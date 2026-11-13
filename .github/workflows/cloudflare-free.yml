@@ -65,7 +65,11 @@ jobs:
           LOOI_AI_MODEL: ${{ secrets.LOOI_AI_MODEL }}
         run: |
           node -e 'const k=["NVIDIA_API_KEY","GROQ_API_KEY","COMPOSIO_API_KEY","LOOI_ADMIN_TOKEN","LOOI_AI_BASE_URL","LOOI_AI_KEY","LOOI_AI_MODEL"];const o={};for(const x of k)if(process.env[x])o[x]=process.env[x];require("fs").writeFileSync("/tmp/s.json",JSON.stringify(o))'
-          OUT=$(npx wrangler deploy -c free/wrangler.jsonc --secrets-file /tmp/s.json 2>&1); echo "$OUT"; rm -f /tmp/s.json
+          set +e
+          OUT=$(npx wrangler deploy -c free/wrangler.jsonc --secrets-file /tmp/s.json 2>&1); RC=$?
+          set -e
+          rm -f /tmp/s.json; echo "$OUT"
+          [ $RC -eq 0 ] || { echo "::error::wrangler deploy failed"; exit 1; }
           URL=$(echo "$OUT" | grep -oE 'https://[a-z0-9.-]+\.workers\.dev' | head -1)
           echo "url=$URL" >> $GITHUB_OUTPUT
           echo "### Looi Free is live: $URL" >> $GITHUB_STEP_SUMMARY
