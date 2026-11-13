@@ -261,10 +261,12 @@ function AgentHero({ missions }: { missions: any[] }) {
 
 function SetupChecklist() {
   const { data: s } = useQuery<any>({ queryKey: ["/api/settings"], staleTime: 0 });
+  const { data: chans = [] } = useQuery<any[]>({ queryKey: ["/api/channels"], staleTime: 0 });
   if (!s) return null;
+  const hasChannel = chans.some((c) => c.status === "connected");
   const items = [
     { done: s.hasApiKey || (!s.device && s.builtinAvailable), icon: KeyRound, title: "Add an AI key", body: "Free Groq or NVIDIA NIM key — powers the audit, copy and strategist.", href: "/app/settings", cta: "Add key" },
-    { done: s.hasComposioKey || s.composioServer, icon: Plug, title: "Connect your channels", body: "One-click X, LinkedIn, Reddit, Telegram and more via Composio.", href: "/app/channels", cta: "Connect" },
+    { done: hasChannel, icon: Plug, title: "Connect your channels", body: "One-click X, LinkedIn, Reddit, Telegram and more. Looi posts there for you.", href: "/app/channels", cta: "Connect" },
     ...(s.device ? [{ done: s.hasPsiKey, icon: Gauge, title: "PageSpeed key (recommended)", body: "Google's free key makes Lighthouse reliable — the shared quota is often exhausted.", href: "/app/settings", cta: "Add key" }] : []),
   ];
   const left = items.filter((i) => !i.done).length;

@@ -1,5 +1,7 @@
 import { cn } from "@/lib/utils";
 import { useQuery } from "@tanstack/react-query";
+import { useMe } from "@/lib/auth";
+import { isDeviceMode } from "@/lib/queryClient";
 
 export function LooiMark({ className = "size-6", spinning = false }: { className?: string; spinning?: boolean }) {
   return (
@@ -97,7 +99,9 @@ export type LiveJob = { missionId: number; name: string; favicon: string; kind: 
 export type LiveState = { jobs: LiveJob[]; queued: { missionId: number; name: string }[]; approvals: any[]; unread: number; latest: any; now: number };
 
 export function useLive() {
-  return useQuery<LiveState>({ queryKey: ["/api/live"], refetchInterval: 2000, staleTime: 0 });
+  const { data: me } = useMe();
+  const enabled = isDeviceMode() || (!!me && (!me.saas || !!me.user));
+  return useQuery<LiveState>({ queryKey: ["/api/live"], refetchInterval: enabled ? 2000 : false, staleTime: 0, enabled });
 }
 
 export function Empty({ title, body, children }: { title: string; body?: string; children?: React.ReactNode }) {

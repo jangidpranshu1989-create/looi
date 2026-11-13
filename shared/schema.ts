@@ -151,6 +151,38 @@ export const playbooks = sqliteTable("playbooks", {
   createdAt: integer("created_at").notNull(),
 });
 
+// ---------- Looi Cloud accounts (see server/billing.ts)
+export const users = sqliteTable("users", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  email: text("email").notNull().unique(),
+  name: text("name").notNull().default(""),
+  pass: text("pass").notNull(),
+  plan: text("plan").notNull().default("free"),
+  planUntil: integer("plan_until").notNull().default(0),
+  planStart: integer("plan_start").notNull().default(0),
+  createdAt: integer("created_at").notNull(),
+  lastSeen: integer("last_seen").notNull().default(0),
+  limitNotice: integer("limit_notice").notNull().default(0),
+});
+export const sessions = sqliteTable("sessions", {
+  tokenHash: text("token_hash").primaryKey(),
+  userId: integer("user_id").notNull(),
+  createdAt: integer("created_at").notNull(),
+  ua: text("ua").notNull().default(""),
+});
+export const payments = sqliteTable("payments", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  userId: integer("user_id").notNull(),
+  orderId: text("order_id").notNull().unique(),
+  paymentId: text("payment_id").notNull().default(""),
+  plan: text("plan").notNull(),
+  amount: integer("amount").notNull(),
+  currency: text("currency").notNull().default("INR"),
+  status: text("status").notNull().default("created"),
+  createdAt: integer("created_at").notNull(),
+  paidAt: integer("paid_at").notNull().default(0),
+});
+
 export const insertMissionSchema = z.object({
   url: z.string().min(4),
   mode: z.enum(["approval", "autopilot"]).optional(),

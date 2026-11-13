@@ -6,7 +6,7 @@ const src = path.resolve(root, "../dist/public");
 const out = path.resolve(root, "www");
 fs.rmSync(out, { recursive: true, force: true });
 fs.cpSync(src, out, { recursive: true });
-fs.copyFileSync(path.join(root, "setup/boot.js"), path.join(out, "boot.js"));
+fs.writeFileSync(path.join(out, "boot.js"), fs.readFileSync(path.join(root, "setup/boot.js"), "utf8").replace("__LOOI_CLOUD_URL__", (process.env.LOOI_CLOUD_URL || "__LOOI_CLOUD_URL__").replace(/\/$/, "")));
 // Bundle the on-device background agent (shares core/ with the app).
 import { execSync } from "node:child_process";
 execSync(`${path.resolve(root, "../node_modules/.bin/esbuild")} ${path.join(root, "runner-src/runner.ts")} --bundle --format=iife --target=es2019 --outfile=${path.join(root, "runners/looi-runner.js")}`, { stdio: "inherit", cwd: path.resolve(root, "..") });

@@ -496,6 +496,7 @@ export async function runLighthouse(url: string, strategy: "mobile" | "desktop",
     // fallback: Google PageSpeed Insights API
     const q = new URLSearchParams({ url, strategy });
     categories.forEach((c) => q.append("category", c.toUpperCase().replace("-", "_")));
+    psiKey = psiKey || process.env.PSI_API_KEY || process.env.GOOGLE_PSI_KEY || "";
     if (psiKey) q.set("key", psiKey);
     const r = await fetch(`https://www.googleapis.com/pagespeedonline/v5/runPagespeed?${q}`, { signal: AbortSignal.timeout(90000) });
     if (!r.ok) throw new Error(`Lighthouse failed (${(e as Error).message}); PageSpeed API ${r.status}`);

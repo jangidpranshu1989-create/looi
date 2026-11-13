@@ -1,76 +1,53 @@
-# Deploying Looi
+# Deploying Looi Cloud (Hindi/English quick guide)
 
-Looi ships in two shapes. Pick one or both.
+Goal: Looi runs on **your** server with **your** AI keys, so users only sign up and paste a URL. Free 7-day trial, then Free / Pro (₹999) / Scale (₹2,999) via Razorpay.
 
-| | Android app (on-device) | Web app (server) |
-|---|---|---|
-| Where the agent runs | On the user's phone | On your server, 24/7 |
-| Server needed | No | Yes (Docker) |
-| Keys | Each user adds their own (Groq / NVIDIA NIM, Composio, PageSpeed) | You can set shared keys via env |
-| Background | Android WorkManager, about every 15 min at most often | Always on |
-| Click tracking | UTM tags only | Built-in redirect tracker |
-| Instagram / image posts | Not possible (needs a public image URL) | Yes, with `LOOI_PUBLIC_URL` |
+## 1. Server (Render, ~10 minutes)
 
-## 1. Android app: no server
+1. Open **https://render.com/deploy?repo=https://github.com/jangidpranshu1989-create/looi** (sign in with GitHub).
+2. Render reads `render.yaml`: Docker web service `looi`, region Singapore, plan **Standard (2 GB RAM, ~$25/mo)**, 10 GB disk at `/app/looi-data` (~$2.50/mo).
+   Starter (512 MB) is too small for Chromium + FFmpeg video rendering; free instances sleep and lose data.
+3. Paste the secret values when Render asks:
+   - `GROQ_API_KEY` — https://console.groq.com/keys (use the paid Dev tier once you have users; free limits are low)
+   - `NVIDIA_API_KEY` — https://build.nvidia.com (automatic failover)
+   - `COMPOSIO_API_KEY` — https://platform.composio.dev (one-click publishing plugins)
+   - `PSI_API_KEY` — Google PageSpeed Insights key
+   - `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET` — dashboard.razorpay.com → Settings → API keys (use Live keys after KYC)
+   - `RAZORPAY_WEBHOOK_SECRET` — any strong string; use the same in Razorpay → Webhooks
+   - `ADMIN_EMAILS` — your email (gets the unlimited plan)
+   - `LOOI_PUBLIC_URL` — leave empty for `*.onrender.com`; set it when you add a custom domain
+4. Deploy. Health check: `https://<service>.onrender.com/api/health`.
+5. Razorpay → Webhooks → `https://<your-domain>/api/billing/webhook`, events `payment.captured`, `order.paid`, same secret.
+6. Custom domain (optional): Render → Settings → Custom Domains → add `looi.yourdomain.com`, set the CNAME, then set `LOOI_PUBLIC_URL`.
 
-Files: `Looi.apk` (signed release, direct install) and `Looi.aab` (for Google Play).
+Every push to `main` redeploys automatically.
 
-### Option A: direct download (free, fastest)
-1. Upload `Looi.apk` to GitHub Releases, your website, or Google Drive.
-2. Users open the link on Android and allow "Install unknown apps".
-3. On first launch they pick **Run on this phone**, then add:
-   - an AI key: Groq (https://console.groq.com/keys) or NVIDIA NIM (https://build.nvidia.com)
-   - a Composio key for one-click publishing (https://platform.composio.dev)
-   - a Google PageSpeed key, recommended because the shared keyless quota is often used up (https://developers.google.com/speed/docs/insights/v5/get-started#APIKey)
-4. Ask users to turn off battery optimization for Looi (Settings → Apps → Looi → Battery → Unrestricted) so background checks aren't delayed.
+## 2. Android app pointing at your cloud
 
-### Option B: Google Play
-1. Create a Play Console account: $25 one-time fee.
-2. New personal accounts must run a closed test with 12+ testers opted in for 14 continuous days before production access: https://support.google.com/googleplay/android-developer/answer/14151465
-3. Upload `Looi.aab`. Since Aug 31, 2026 Play requires new apps and updates to target API 36 (Android 16), which Looi does: https://support.google.com/googleplay/android-developer/answer/11926878
-4. Declare in the Data Safety form that keys and data are stored on the device and sent only to the providers the user configures.
+1. GitHub repo → Settings → Secrets and variables → Actions:
+   - Variable `LOOI_CLOUD_URL` = your server URL
+   - Secrets `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS` (`looi`)
+2. Actions → **Android APK** → Run workflow (or push a tag `v1.0.1`). The signed `Looi.apk` and `Looi.aab` appear under Releases.
+3. Google Play: upload `Looi.aab` in Play Console (one-time $25). Keep the keystore safe — every update must use the same key.
 
-### Signing key: keep it safe
-`looi-release.jks` plus its password (in `KEYSTORE-PASSWORD.txt`) sign every update. If you lose them you can't update the app for existing users. Back them up offline and never commit them. For CI, add repo secrets `KEYSTORE_BASE64` and `KEYSTORE_PASSWORD`. `.github/workflows/android.yml` then builds and signs on every push.
+## 3. Other hosts
 
-### Rebuild locally
+Any Docker host with 2 GB+ RAM works (Hetzner/DigitalOcean VPS, Railway, Fly.io, Coolify):
+
 ```bash
-# Node 22, JDK 21, Android SDK 36
-npm ci && cd native && npm install
-npm run web && npx cap add android && node scripts/patch-android.mjs && npx cap sync android
-cd android && ./gradlew assembleRelease bundleRelease
+cp .env.example .env    # fill in
+docker build -t looi . && docker run -d --restart=always -p 5000:5000 --env-file .env -v looi-data:/app/looi-data looi
 ```
 
-### iOS
-Run `cd native && npx cap add ios && npm run ios` on a Mac with Xcode. You need an Apple Developer account ($99/yr). iOS background runs are best-effort: the OS decides when and whether to wake the app.
+Put Caddy or Nginx in front for HTTPS.
 
-## 2. Web app: server for everyone
+## 4. Admin
 
-The repo includes a `Dockerfile` (Node + Chromium for Lighthouse and screenshots, SQLite on a volume).
+- `GET /api/admin/stats` (admin token) — users, paid users, revenue, missions.
+- `POST /api/admin/grant {email, plan, days}` — give someone Pro/Scale manually.
 
-### Railway / Render / Fly.io (easiest)
-1. Push this repo to GitHub.
-2. Create a new service from the repo. It auto-detects the `Dockerfile`.
-3. Attach a **persistent volume** at `/app/looi-data`. Missions, ads and the DB live there.
-4. Set env vars:
-   - `PORT=5000`
-   - `LOOI_PUBLIC_URL=https://your-domain.com`: needed for tracked links, OAuth callbacks and Instagram media
-   - `COMPOSIO_API_KEY=...`: optional, so users don't need their own
-   - Optional AI defaults: users can also set Groq / NIM keys in Settings
-5. Add your custom domain. HTTPS is automatic on all three.
+## 5. Before going big
 
-### VPS (DigitalOcean, Hetzner, AWS Lightsail, ~$5–6/mo)
-```bash
-docker build -t looi .
-docker run -d --restart=always -p 5000:5000 -v /srv/looi:/app/looi-data \
-  -e LOOI_PUBLIC_URL=https://looi.example.com -e COMPOSIO_API_KEY=... looi
-```
-Put Caddy or Nginx in front for HTTPS (`caddy reverse-proxy --from looi.example.com --to :5000`).
-
-### Point the app at your server (optional)
-In the Android app: Settings → Where Looi runs → "Use a Looi server instead", then enter your URL.
-
-## 3. Before you go public
-- Multi-user: the server is single-tenant per device ID today. Add real auth (e.g. Clerk/Auth.js) before opening it to strangers.
-- Rate limits and costs: X API posts cost money per post (https://docs.x.com/x-api/getting-started/pricing). Composio and LLM providers have their own quotas.
-- Privacy policy + terms are required by Google Play and by most OAuth platforms.
+- Move Groq to a paid tier; free limits get hit quickly with many users.
+- Back up `/app/looi-data` (Render disk snapshots are daily).
+- Not built yet: password-reset email, Google sign-in, abuse checks for repeated trials.

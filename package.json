@@ -1,7 +1,7 @@
 {
-  "name": "rest-express",
+  "name": "looi",
   "version": "1.0.0",
-  "license": "MIT",
+  "license": "AGPL-3.0-only",
   "type": "module",
   "scripts": {
     "dev": "NODE_ENV=development tsx server/index.ts",
@@ -111,5 +111,7 @@
     "drizzle-kit": {
       "@esbuild-kit/esm-loader": "npm:tsx@^4.20.4"
     }
-  }
+  },
+  "description": "Looi - open-source 24/7 AI marketing agent: paste a URL, get a real site audit, animated video ads, auto-publishing and re-checks every 2-3 hours.",
+  "repository": "github:jangidpranshu1989-create/looi"
 }

@@ -136,7 +136,8 @@ async function serverRun() {
   const server = kvGet("server");
   const device = kvGet("device");
   if (!server) return;
-  const res = await fetch(server.replace(/\/$/, "") + "/api/live", { headers: { "X-Looi-Device": device || "" } });
+  const res = await fetch(server.replace(/\/$/, "") + "/api/live", { headers: { "X-Looi-Device": device || "", Authorization: "Bearer " + (kvGet("token") || "") } });
+  if (res.status === 401) return;
   const live = await res.json();
   const lastSeen = Number(kvGet("lastNotif") || 0);
   const n = live.latest;
@@ -158,6 +159,7 @@ addEventListener("looiCheck", async (resolve, reject, args) => {
       CapacitorKV.set("mode", "server");
       CapacitorKV.set("server", args.server);
       CapacitorKV.set("device", args.device || "");
+      if (args.token != null) CapacitorKV.set("token", args.token || "");
       return resolve();
     }
     let active = false;

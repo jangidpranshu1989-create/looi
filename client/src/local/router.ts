@@ -89,6 +89,7 @@ const mission = (id: string) => {
 
 on("GET", "/api/health", () => ({ ok: true, ts: Date.now(), device: true }));
 on("GET", "/api/meta", () => ({ providers: Object.fromEntries(Object.entries(PROVIDERS)), channelTypes: CHANNEL_TYPES, formats: FORMATS, templates: TEMPLATES, builtinAvailable: false, device: true }));
+on("GET", "/api/me", () => ({ saas: false, user: null, payments: false, razorpayKeyId: "", trialDays: 0, plans: [], device: true }));
 
 on("GET", "/api/settings", () => maskSettings(A.getSettings()));
 on("PATCH", "/api/settings", (_p, b) => {

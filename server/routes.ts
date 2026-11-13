@@ -9,12 +9,36 @@ import { PROVIDERS, testProvider, listModels, builtinAvailable } from "./agent/l
 import { CHANNEL_TYPES, verifyChannel } from "./agent/publish";
 import { FORMATS, TEMPLATES } from "./agent/render";
 import * as cx from "./agent/composio";
+import * as billing from "./billing";
+import dns from "node:dns/promises";
+import net from "node:net";
 import { enqueue, launchMission, checkMission, generateMore, publishCreatives, live, startScheduler, publicBase } from "./agent/agent";
 
 function owner(req: Request) {
+  if ((req as any).ownerId) return (req as any).ownerId as string;
   const d = (req.header("x-looi-device") || "").trim();
   if (d && /^[\w-]{8,80}$/.test(d)) return "dev-" + d;
   return (req.header("x-visitor-id") || "local").slice(0, 120);
+}
+/** Block private / internal targets so a public server can't be used to probe its own network. */
+function privateIp(ip: string) {
+  if (net.isIPv4(ip)) {
+    const [a, b] = ip.split(".").map(Number);
+    return a === 10 || a === 127 || a === 0 || (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || (a === 100 && b >= 64 && b <= 127) || a >= 224;
+  }
+  const v = ip.toLowerCase();
+  return v === "::1" || v === "::" || v.startsWith("fc") || v.startsWith("fd") || v.startsWith("fe80") || v.startsWith("::ffff:127.") || v.startsWith("::ffff:10.") || v.startsWith("::ffff:192.168.");
+}
+async function assertPublicUrl(u: string) {
+  if (!billing.SAAS) return;
+  const host = new URL(u).hostname.replace(/^\[|\]$/g, "");
+  if (/^(localhost|.*\.local|.*\.internal)$/i.test(host)) throw new Error("private");
+  const addrs = net.isIP(host) ? [host] : (await dns.lookup(host, { all: true })).map((a) => a.address);
+  if (!addrs.length || addrs.some(privateIp)) throw new Error("private");
+}
+function sendLimit(res: Response, e: unknown) {
+  if (e instanceof billing.LimitError) return res.status(402).json({ message: e.message, upgrade: true });
+  throw e;
 }
 const J = (s: string, d: any = {}) => {
   try {
@@ -53,11 +77,13 @@ function missionOut(m: any) {
 export async function registerRoutes(httpServer: Server, app: Express): Promise<Server> {
   app.use((req, res, next) => {
     res.setHeader("Access-Control-Allow-Origin", "*");
-    res.setHeader("Access-Control-Allow-Headers", "Content-Type, X-Looi-Device");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type, X-Looi-Device, Authorization");
     res.setHeader("Access-Control-Allow-Methods", "GET,POST,PATCH,DELETE,OPTIONS");
     if (req.method === "OPTIONS") return res.sendStatus(204);
     next();
   });
+
+  billing.installAuth(app);
 
   app.get("/api/health", (_req, res) => res.json({ ok: true, ts: Date.now() }));
   app.get("/api/meta", (_req, res) =>
@@ -118,7 +144,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     });
     res.json(list);
   });
-  app.post("/api/missions", (req, res) => {
+  app.post("/api/missions", async (req, res) => {
     const parsed = insertMissionSchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ message: "Please enter a valid URL" });
     let url: string;
@@ -127,7 +153,17 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     } catch {
       return res.status(400).json({ message: "Please enter a valid URL" });
     }
+    try {
+      await assertPublicUrl(url);
+    } catch {
+      return res.status(400).json({ message: "That address isn't reachable on the public internet. Enter your live website or app URL." });
+    }
     const o = owner(req);
+    try {
+      billing.assertCanLaunch(o);
+    } catch (e) {
+      return sendLimit(res, e);
+    }
     const st = storage.getSettings(o);
     const channelIds = parsed.data.channelIds ?? storage.listChannels(o).filter((c) => c.status === "connected").map((c) => c.id);
     const m = storage.createMission(o, { url, name: new URL(url).hostname.replace(/^www\./, ""), mode: parsed.data.mode || st.defaultMode, goal: parsed.data.goal || "", channelIds: JSON.stringify(channelIds), status: "queued", stage: "Queued" });
@@ -165,6 +201,14 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     const m = storage.getMission(Number(req.params.id));
     if (!m || m.ownerId !== owner(req)) return res.status(404).json({ message: "Mission not found" });
     const patch: any = {};
+    if (req.body.status === "active" && (m.status === "paused" || m.status === "failed")) {
+      try {
+        billing.assertCanLaunch(m.ownerId);
+      } catch (e) {
+        if (!(e instanceof billing.LimitError) || /active mission/.test(e.message)) return sendLimit(res, e);
+      }
+    }
+    if (req.body.mode === "autopilot" && !billing.autopilotAllowed(m.ownerId)) return res.status(402).json({ message: "Autopilot is part of Pro. Your Free plan publishes after your approval.", upgrade: true });
     if (req.body.status === "paused" || req.body.status === "active") {
       patch.status = req.body.status;
       if (req.body.status === "active" && m.nextCheckAt < Date.now()) patch.nextCheckAt = Date.now() + 60000;
@@ -184,6 +228,9 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   app.post("/api/missions/:id/check", (req, res) => {
     const m = storage.getMission(Number(req.params.id));
     if (!m || m.ownerId !== owner(req)) return res.status(404).json({ message: "Mission not found" });
+    const { plan } = billing.planFor(m.ownerId);
+    if (billing.SAAS && m.lastCheckAt && Date.now() - m.lastCheckAt < Math.min(plan.minInterval, 240) * 60000 / 4)
+      return res.status(429).json({ message: `Looi just checked this site. On ${plan.label} you can re-check every ${Math.round(Math.min(plan.minInterval, 240) / 4)} minutes.`, upgrade: plan.key === "free" });
     if (m.status === "failed" || !m.brief || m.brief === "{}") {
       storage.updateMission(m.id, { status: "queued", stage: "Queued" });
       enqueue(m.id, "launch", () => launchMission(m.id));
@@ -193,6 +240,11 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   app.post("/api/missions/:id/generate", (req, res) => {
     const m = storage.getMission(Number(req.params.id));
     if (!m || m.ownerId !== owner(req)) return res.status(404).json({ message: "Mission not found" });
+    try {
+      billing.assertCanCreate(m.ownerId);
+    } catch (e) {
+      return sendLimit(res, e);
+    }
     enqueue(m.id, "generate", () => generateMore(m.id));
     res.json({ ok: true });
   });

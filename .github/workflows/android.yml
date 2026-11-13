@@ -1,29 +1,54 @@
-name: Build Looi Android
-on: { push: { branches: [main] }, workflow_dispatch: {} }
+name: Android APK
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+permissions:
+  contents: write
 jobs:
-  android:
+  apk:
     runs-on: ubuntu-latest
+    env:
+      LOOI_CLOUD_URL: ${{ vars.LOOI_CLOUD_URL }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
-        with: { node-version: 22 }
+        with:
+          node-version: 22
       - uses: actions/setup-java@v4
-        with: { distribution: temurin, java-version: 21 }
+        with:
+          distribution: temurin
+          java-version: 21
       - uses: android-actions/setup-android@v3
-      - run: npm ci
-      - run: cd native && npm install && npm run web && npx cap add android && node scripts/patch-android.mjs && npx cap sync android
-      - run: cd native/android && chmod +x gradlew && ./gradlew assembleRelease bundleRelease
-      # Optional signing: add repo secrets KEYSTORE_BASE64 (base64 of looi-release.jks) and KEYSTORE_PASSWORD
-      - name: Sign
-        if: ${{ env.KS != '' }}
-        env: { KS: "${{ secrets.KEYSTORE_BASE64 }}", PW: "${{ secrets.KEYSTORE_PASSWORD }}" }
+      - name: Build web client
+        run: npm ci && npm run build
+      - name: Build Android
+        working-directory: native
         run: |
-          echo "$KS" | base64 -d > ks.jks
-          BT=$(ls -d $ANDROID_HOME/build-tools/* | tail -1)
-          O=native/android/app/build/outputs
-          $BT/zipalign -f -p 4 $O/apk/release/app-release-unsigned.apk Looi.apk
-          $BT/apksigner sign --ks ks.jks --ks-pass env:PW --ks-key-alias looi Looi.apk
-          cp $O/bundle/release/app-release.aab Looi.aab
-          jarsigner -keystore ks.jks -storepass "$PW" Looi.aab looi
-      - uses: actions/upload-artifact@v4
-        with: { name: looi-android, path: "Looi.apk\nLooi.aab\nnative/android/app/build/outputs/**/*.apk" }
+          npm ci
+          node scripts/sync-web.mjs
+          npx cap add android
+          node scripts/patch-android.mjs
+          npx cap sync android
+          cd android && ./gradlew assembleRelease bundleRelease --no-daemon -q
+      - name: Sign
+        env:
+          KS_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KS_PASS: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KS_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+        run: |
+          echo "$KS_B64" | base64 -d > ks.jks
+          BT=$(ls -d $ANDROID_HOME/build-tools/* | sort -V | tail -1)
+          OUT=native/android/app/build/outputs
+          $BT/zipalign -f -p 4 $OUT/apk/release/app-release-unsigned.apk aligned.apk
+          $BT/apksigner sign --ks ks.jks --ks-key-alias "$KS_ALIAS" --ks-pass env:KS_PASS --key-pass env:KS_PASS --out Looi.apk aligned.apk
+          jarsigner -keystore ks.jks -storepass "$KS_PASS" -keypass "$KS_PASS" -signedjar Looi.aab $OUT/bundle/release/app-release.aab "$KS_ALIAS"
+          rm ks.jks
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_type == 'tag' && github.ref_name || format('build-{0}', github.run_number) }}
+          name: Looi ${{ github.ref_type == 'tag' && github.ref_name || format('build {0}', github.run_number) }}
+          make_latest: true
+          files: |
+            Looi.apk
+            Looi.aab

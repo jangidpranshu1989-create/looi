@@ -22,8 +22,41 @@ function builtin() {
   return anthropic;
 }
 
+const anthropicAvailable = () => !!(process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_AUTH_TOKEN);
+
+/**
+ * "Looi AI" — the AI engine the server owner pays for, so users never need a key.
+ * Tried in order; on rate limits / errors the next one takes over.
+ */
+interface House { label: string; baseUrl: string; apiKey: string; model: string }
+function houseProviders(): House[] {
+  const e = process.env;
+  const out: House[] = [];
+  if (e.LOOI_AI_BASE_URL && e.LOOI_AI_KEY) out.push({ label: "Looi AI", baseUrl: e.LOOI_AI_BASE_URL, apiKey: e.LOOI_AI_KEY, model: e.LOOI_AI_MODEL || "gpt-4.1-mini" });
+  if (e.GROQ_API_KEY) out.push({ label: "Looi AI (Groq)", baseUrl: PROVIDERS.groq.baseUrl, apiKey: e.GROQ_API_KEY, model: e.GROQ_MODEL || PROVIDERS.groq.defaultModel });
+  if (e.NVIDIA_API_KEY) out.push({ label: "Looi AI (NIM)", baseUrl: PROVIDERS.nvidia.baseUrl, apiKey: e.NVIDIA_API_KEY, model: e.NVIDIA_MODEL || PROVIDERS.nvidia.defaultModel });
+  if (e.OPENAI_API_KEY) out.push({ label: "Looi AI (OpenAI)", baseUrl: PROVIDERS.openai.baseUrl, apiKey: e.OPENAI_API_KEY, model: e.OPENAI_MODEL || PROVIDERS.openai.defaultModel });
+  return out;
+}
 export function builtinAvailable() {
-  return !!(process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_AUTH_TOKEN);
+  return houseProviders().length > 0 || anthropicAvailable();
+}
+/** Image generation helper only exists in the original dev sandbox. */
+export function imageGenAvailable() {
+  return anthropicAvailable() && process.env.LOOI_IMAGE_GEN !== "0";
+}
+async function callHouse(messages: Msg[], o: ChatOpts): Promise<{ text: string; via: string }> {
+  let last: unknown;
+  for (const h of houseProviders()) {
+    try {
+      const st = { provider: "custom", baseUrl: h.baseUrl, apiKey: h.apiKey, model: h.model } as Settings;
+      return { text: await callCompatible(st, messages, o), via: h.label };
+    } catch (e) {
+      last = e;
+    }
+  }
+  if (anthropicAvailable()) return { text: await callBuiltin(messages, o), via: "Looi AI" };
+  throw last || new Error("Looi AI is not configured on this server.");
 }
 
 async function callCompatible(st: Settings, messages: Msg[], o: ChatOpts) {
@@ -89,12 +122,13 @@ export async function chat(st: Settings, messages: Msg[], o: ChatOpts = {}): Pro
       return { text: await callCompatible(st, messages, o), via: PROVIDERS[st.provider]?.label || st.provider };
     } catch (e) {
       if (!st.builtinFallback || !builtinAvailable()) throw e;
-      return { text: await callBuiltin(messages, o), via: "Looi built-in (fallback)" };
+      const r = await callHouse(messages, o);
+      return { text: r.text, via: r.via + " (fallback)" };
     }
   }
   if (st.provider !== "builtin" && !st.apiKey && !st.builtinFallback) throw new Error("No API key set for your AI provider. Add it in Settings → AI engine.");
-  if (!builtinAvailable()) throw new Error("No AI provider configured. Add a Groq / NVIDIA NIM / OpenAI-compatible key in Settings.");
-  return { text: await callBuiltin(messages, o), via: "Looi built-in" };
+  if (!builtinAvailable()) throw new Error("No AI provider configured. Add a Groq / NVIDIA NIM / OpenAI-compatible key in Settings (or set GROQ_API_KEY on the server).");
+  return callHouse(messages, o);
 }
 
 export function parseJson<T = any>(text: string): T {

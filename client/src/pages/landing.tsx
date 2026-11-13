@@ -1,7 +1,12 @@
 import { useState } from "react";
 import { Link, useLocation } from "wouter";
 import { useMutation } from "@tanstack/react-query";
-import { ArrowRight, Gauge, Clapperboard, Send, RefreshCcw, Cpu, Smartphone, ShieldCheck, Sparkles } from "lucide-react";
+import { ArrowRight, Gauge, Clapperboard, Send, RefreshCcw, Cpu, Smartphone, ShieldCheck, Sparkles, Github, Star, KeyRound, Gift } from "lucide-react";
+import { PricingCards } from "@/components/pricing";
+import { useMe } from "@/lib/auth";
+import { setPendingUrl } from "@/pages/auth";
+import { GITHUB_URL } from "@/lib/config";
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -19,7 +24,13 @@ export function UrlLauncher({ size = "lg", testId = "hero" }: { size?: "lg" | "m
       queryClient.invalidateQueries({ queryKey: ["/api/missions"] });
       nav(`/app/m/${m.id}`);
     },
-    onError: (e: Error) => toast({ title: "Couldn't start mission", description: e.message, variant: "destructive" }),
+    onError: (e: Error) => {
+      if (/sign in/i.test(e.message)) {
+        setPendingUrl(url);
+        return nav("/signup");
+      }
+      toast({ title: "Couldn't start mission", description: e.message, variant: "destructive" });
+    },
   });
   return (
     <form
@@ -56,7 +67,15 @@ const STEPS = [
   { icon: RefreshCcw, title: "24/7 re-check", body: "Every 2–3 hours Looi re-measures your site, reads post metrics and clicks, and decides: scale, iterate, or pivot to a new route." },
 ];
 
+const scrollTo = (id: string) => (e: React.MouseEvent) => {
+  e.preventDefault();
+  document.getElementById(id)?.scrollIntoView({ behavior: "smooth" });
+};
+
 export default function Landing() {
+  const { data: me } = useMe();
+  const [, nav] = useLocation();
+  const signedIn = !me?.saas || !!me?.user;
   return (
     <div className="min-h-dvh bg-background text-foreground">
       <LivePill />
@@ -64,11 +83,22 @@ export default function Landing() {
         <div className="mx-auto flex h-14 max-w-6xl items-center justify-between px-5">
           <Wordmark />
           <nav className="flex items-center gap-1 text-sm">
-            <a href="#how" onClick={(e) => { e.preventDefault(); document.getElementById("how")?.scrollIntoView({ behavior: "smooth" }); }} className="hidden px-3 py-2 text-muted-foreground hover:text-foreground sm:block">How it works</a>
-            <Link href="/download" className="hidden px-3 py-2 text-muted-foreground hover:text-foreground sm:block" data-testid="link-download-nav">Apps</Link>
-            <Link href="/app">
-              <Button size="sm" variant="secondary" data-testid="button-open-app">Open dashboard</Button>
-            </Link>
+            <a href="#how" onClick={scrollTo("how")} className="hidden px-3 py-2 text-muted-foreground hover:text-foreground md:block">How it works</a>
+            <a href="#pricing" onClick={scrollTo("pricing")} className="hidden px-3 py-2 text-muted-foreground hover:text-foreground sm:block" data-testid="link-pricing-nav">Pricing</a>
+            <Link href="/download" className="hidden px-3 py-2 text-muted-foreground hover:text-foreground md:block" data-testid="link-download-nav">Apps</Link>
+            <a href={GITHUB_URL} target="_blank" rel="noreferrer" className="hidden items-center gap-1.5 px-3 py-2 text-muted-foreground hover:text-foreground lg:inline-flex" data-testid="link-github-nav"><Github className="size-4" /> GitHub</a>
+            {signedIn ? (
+              <Link href="/app">
+                <Button size="sm" variant="secondary" data-testid="button-open-app">Open dashboard</Button>
+              </Link>
+            ) : (
+              <>
+                <Link href="/login" className="px-3 py-2 text-muted-foreground hover:text-foreground" data-testid="link-login">Sign in</Link>
+                <Link href="/signup">
+                  <Button size="sm" data-testid="button-start-free">Start free</Button>
+                </Link>
+              </>
+            )}
           </nav>
         </div>
       </header>
@@ -91,12 +121,12 @@ export default function Landing() {
           </p>
           <div className="mt-8">
             <UrlLauncher />
-            <p className="mt-3 text-xs text-muted-foreground">Nothing is faked: every score is measured, every ad is rendered from your live site.</p>
+            <p className="mt-3 text-xs text-muted-foreground">Free {me?.trialDays ?? 7}-day trial · no credit card · no API keys. Every score is measured, every ad is rendered from your live site.</p>
           </div>
           <div className="mt-8 flex flex-wrap items-center gap-x-5 gap-y-2 text-xs text-muted-foreground">
-            <span className="inline-flex items-center gap-1.5"><Smartphone className="size-3.5 text-primary" /> Android app runs it on your phone — no server</span>
-            <span className="inline-flex items-center gap-1.5"><Cpu className="size-3.5 text-primary" /> Groq · NVIDIA NIM · any OpenAI API</span>
-            <span className="inline-flex items-center gap-1.5"><ShieldCheck className="size-3.5 text-primary" /> Bring your own keys — no lock-in</span>
+            <span className="inline-flex items-center gap-1.5"><KeyRound className="size-3.5 text-primary" /> Looi AI included, no keys to paste</span>
+            <span className="inline-flex items-center gap-1.5"><Smartphone className="size-3.5 text-primary" /> Web, Android and iOS</span>
+            <span className="inline-flex items-center gap-1.5"><Github className="size-3.5 text-primary" /> Open source</span>
           </div>
           </div>
           <HeroPhone />
@@ -129,7 +159,7 @@ export default function Landing() {
               {[
                 ["Approval mode", "Looi asks before every publish — approve right from the pill at the top of the screen."],
                 ["Autopilot", "Looi publishes on its own and just keeps you posted."],
-                ["Background work", "Close the tab. The agent keeps running on the server and the app notifies you."],
+                ["Background work", "Close the tab or the app. The agent keeps running in the cloud and notifies you."],
               ].map(([t, b]) => (
                 <li key={t} className="flex gap-3">
                   <ShieldCheck className="mt-0.5 size-4 shrink-0 text-primary" />
@@ -171,9 +201,9 @@ export default function Landing() {
       <section className="border-t border-border">
         <div className="mx-auto grid max-w-6xl gap-6 px-5 py-20 md:grid-cols-2 lg:grid-cols-4">
           <div className="md:col-span-1">
-            <p className="font-mono text-xs uppercase tracking-widest text-primary">Bring your own brain</p>
-            <h2 className="mt-3 font-display text-3xl font-extrabold">Any OpenAI-compatible model.</h2>
-            <p className="mt-4 text-sm text-muted-foreground">Plug in your own key — Looi works with any endpoint that speaks the OpenAI chat API. A built-in engine is available as a fallback.</p>
+            <p className="font-mono text-xs uppercase tracking-widest text-primary">The brain</p>
+            <h2 className="mt-3 font-display text-3xl font-extrabold">Looi AI is built in.</h2>
+            <p className="mt-4 text-sm text-muted-foreground">It runs on fast open models out of the box. Power users can switch to their own Groq, NVIDIA NIM or any OpenAI-compatible key in Settings.</p>
           </div>
           {[
             { icon: Cpu, t: "Groq", d: "Fast inference at api.groq.com/openai/v1 — default openai/gpt-oss-120b." },
@@ -186,6 +216,52 @@ export default function Landing() {
               <p className="mt-2 text-sm text-muted-foreground">{p.d}</p>
             </div>
           ))}
+        </div>
+      </section>
+
+      <section className="border-t border-border" id="pricing">
+        <div className="mx-auto max-w-6xl px-5 py-20">
+          <div className="mx-auto max-w-2xl text-center">
+            <p className="font-mono text-xs uppercase tracking-widest text-primary">Pricing</p>
+            <h2 className="mt-3 font-display text-3xl font-extrabold md:text-4xl">Start free. Pay when it's working.</h2>
+            <p className="mt-3 text-muted-foreground">Every account starts with a {me?.trialDays ?? 7}-day Pro trial. No card needed, and you drop to Free automatically if you don't upgrade.</p>
+          </div>
+          <div className="mt-12">
+            <PricingCards plans={me?.plans} trialDays={me?.trialDays} onChoose={() => nav(me?.user ? "/app/billing" : "/signup")} />
+          </div>
+          <p className="mt-6 inline-flex w-full items-center justify-center gap-1.5 text-center text-xs text-muted-foreground"><Gift className="size-3.5" /> Self-hosting for yourself is free forever. Looi is open source.</p>
+        </div>
+      </section>
+
+      <section className="border-t border-border">
+        <div className="mx-auto grid max-w-6xl gap-10 px-5 py-20 md:grid-cols-[1fr_1.2fr]">
+          <div>
+            <p className="font-mono text-xs uppercase tracking-widest text-primary">Open source</p>
+            <h2 className="mt-3 font-display text-3xl font-extrabold">Built in the open.</h2>
+            <p className="mt-4 text-sm text-muted-foreground">Read every line of the agent, run it on your own server, or send a pull request. Looi is AGPL-3.0 licensed.</p>
+            <div className="mt-6 flex flex-wrap gap-2">
+              <a href={GITHUB_URL} target="_blank" rel="noreferrer">
+                <Button variant="secondary" data-testid="button-github"><Github className="size-4" /> View on GitHub</Button>
+              </a>
+              <a href={GITHUB_URL} target="_blank" rel="noreferrer">
+                <Button variant="ghost" data-testid="button-star"><Star className="size-4" /> Star the repo</Button>
+              </a>
+            </div>
+          </div>
+          <Accordion type="single" collapsible className="rounded-2xl border border-border bg-card px-5">
+            {[
+              ["Do I need API keys?", "No. Looi AI, the site audit and ad rendering run on our servers and are included in every plan. You only connect the social accounts you want Looi to post to, with one click."],
+              ["Is anything fake or simulated?", "No. Scores come from real Lighthouse runs, ads are rendered from screenshots of your live site, and metrics come from the platforms you connect."],
+              ["Will it post without asking?", "Only if you turn on Autopilot. By default Looi asks for approval before every publish, right from the pill at the top of the screen."],
+              ["What happens after the trial?", "You move to the Free plan automatically. Nothing is charged until you choose Pro or Scale and pay with UPI, card or netbanking."],
+              ["Can I run it myself?", "Yes. The full source is on GitHub with a one-click Render blueprint and a Docker image. Self-hosted Looi has no limits."],
+            ].map(([q, a], i) => (
+              <AccordionItem key={q} value={`q${i}`} className={i === 4 ? "border-b-0" : ""}>
+                <AccordionTrigger className="text-left text-sm font-medium" data-testid={`faq-${i}`}>{q}</AccordionTrigger>
+                <AccordionContent className="text-sm text-muted-foreground">{a}</AccordionContent>
+              </AccordionItem>
+            ))}
+          </Accordion>
         </div>
       </section>
 
@@ -206,7 +282,11 @@ export default function Landing() {
       <footer className="border-t border-border">
         <div className="mx-auto flex max-w-6xl items-center justify-between px-5 py-6 text-xs text-muted-foreground">
           <Wordmark className="opacity-70" />
-          <span>Looi · autonomous marketing agent</span>
+          <div className="flex items-center gap-4">
+            <Link href="/privacy" className="hover:text-foreground" data-testid="link-privacy">Privacy</Link>
+            <Link href="/terms" className="hover:text-foreground" data-testid="link-terms">Terms</Link>
+            <a href={GITHUB_URL} target="_blank" rel="noreferrer" className="hover:text-foreground">GitHub</a>
+          </div>
         </div>
       </footer>
     </div>

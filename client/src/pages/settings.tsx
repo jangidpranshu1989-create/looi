@@ -13,9 +13,11 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
+import { useMe } from "@/lib/auth";
+import { Link } from "wouter";
 
 const ENGINES = [
-  { id: "builtin", label: "Looi built-in", d: "No key needed" },
+  { id: "builtin", label: "Looi AI", d: "Included · no key" },
   { id: "groq", label: "Groq", d: "OpenAI-compatible" },
   { id: "nvidia", label: "NVIDIA NIM", d: "OpenAI-compatible" },
   { id: "openai", label: "OpenAI", d: "api.openai.com" },
@@ -44,6 +46,9 @@ export default function Settings() {
   const [cxKey, setCxKey] = useState("");
   const [models, setModels] = useState<string[]>([]);
   const [testRes, setTestRes] = useState<any>(null);
+  const { data: me } = useMe();
+  const saas = !!me?.saas && !s?.device;
+  const minInterval = saas ? Math.max(60, me?.user?.plan.minInterval || 60) : 60;
   useEffect(() => { if (s && !f) setF(s); }, [s]);
 
   const save = useMutation({
@@ -76,7 +81,7 @@ export default function Settings() {
       <h1 className="font-display text-xl font-bold">Settings</h1>
       <p className="mt-1 text-sm text-muted-foreground">Configure the agent's brain, rhythm and how it publishes.</p>
 
-      <Section title="AI engine" desc="Looi uses this model for audits, copy and strategy. Any OpenAI-compatible endpoint works.">
+      <Section title="AI engine" desc={saas ? "Looi AI is included in your plan. Advanced: switch to your own OpenAI-compatible key." : "Looi uses this model for audits, copy and strategy. Any OpenAI-compatible endpoint works."}>
         <div className={cn("grid grid-cols-2 gap-2", s.device ? "sm:grid-cols-4" : "sm:grid-cols-5")}>
           {ENGINES.filter((e) => !(s.device && e.id === "builtin")).map((e) => (
             <button key={e.id} onClick={() => { setF({ ...f, provider: e.id, baseUrl: meta?.providers?.[e.id]?.baseUrl || (e.id === "custom" ? f.baseUrl : ""), model: meta?.providers?.[e.id]?.defaultModel || "" }); setModels([]); setTestRes(null); }} className={cn("rounded-lg border p-3 text-left hover-elevate", f.provider === e.id ? "border-primary bg-primary/5" : "border-border")} data-testid={`button-engine-${e.id}`}>
@@ -124,8 +129,15 @@ export default function Settings() {
       <Section title="Agent rhythm" desc="How often Looi re-checks each mission, re-measures the site and decides the next move.">
         <div>
           <div className="flex items-center justify-between text-sm"><span>Re-check interval</span><span className="font-mono text-primary">{Math.floor(f.intervalMinutes / 60)}h {f.intervalMinutes % 60 ? `${f.intervalMinutes % 60}m` : ""}</span></div>
-          <Slider className="mt-3" min={60} max={360} step={15} value={[f.intervalMinutes]} onValueChange={([v]) => set("intervalMinutes", v)} data-testid="slider-interval" />
-          <p className="mt-2 text-xs text-muted-foreground">Recommended: 2–3 hours. Shorter intervals give fewer real signals per cycle.</p>
+          <Slider className="mt-3" min={Math.min(minInterval, 720)} max={Math.max(360, minInterval)} step={15} value={[Math.max(f.intervalMinutes, minInterval)]} onValueChange={([v]) => set("intervalMinutes", v)} data-testid="slider-interval" />
+          <p className="mt-2 text-xs text-muted-foreground">
+            Recommended: 2–3 hours. Shorter intervals give fewer real signals per cycle.
+            {saas && minInterval > 60 && (
+              <>
+                {" "}Your plan re-checks at most every {Math.round(minInterval / 60)}h. <Link href="/app/billing" className="text-primary">Upgrade</Link> for faster cycles.
+              </>
+            )}
+          </p>
         </div>
         <div className="grid grid-cols-2 gap-2">
           {[["approval", "Ask me first", "Each batch waits for your approval."], ["autopilot", "Autopilot", "Publish automatically for new missions."]].map(([v, t, d]) => (
@@ -155,6 +167,15 @@ export default function Settings() {
       </Section>
 
       <Section title="Plugins" desc="One-click OAuth for X, LinkedIn, Facebook, Instagram, Reddit, Slack, Discord, Telegram, Gmail and 1,000+ more apps through Composio.">
+        {saas && s.composioServer ? (
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-card p-4">
+            <div>
+              <p className="text-sm font-medium">Included with Looi</p>
+              <p className="text-xs text-muted-foreground">Connect X, LinkedIn, Reddit and more with one click. No keys needed.</p>
+            </div>
+            <Link href="/app/channels"><Button variant="secondary" size="sm" data-testid="button-open-plugins">Open plugins</Button></Link>
+          </div>
+        ) : (
         <div className="space-y-1.5">
           <Label htmlFor="cx">Composio API key</Label>
           <Input id="cx" type="password" value={cxKey} onChange={(e) => setCxKey(e.target.value)} placeholder={s.hasComposioKey ? `Saved ${s.composioKeyHint} — type to replace` : s.composioServer ? "Provided by this server — optional override" : "Paste your project API key"} autoComplete="off" data-testid="input-composio-key-settings" />
@@ -163,8 +184,9 @@ export default function Settings() {
           </p>
           {s.hasComposioKey && <Button variant="ghost" size="sm" className="px-0 text-bad" onClick={() => save.mutate({ clearComposioKey: true, composioKey: "" })} data-testid="button-clear-composio">Remove key</Button>}
         </div>
+        )}
       </Section>
-      <Section title={s.device ? "Site audit" : "Tracking & data"} desc={s.device ? "Lighthouse runs through Google PageSpeed Insights. A free key avoids the shared daily quota." : "Public URL enables tracked links (looi.link/r/…) and lets platforms like Instagram fetch your poster."}>
+      {!saas && <Section title={s.device ? "Site audit" : "Tracking & data"} desc={s.device ? "Lighthouse runs through Google PageSpeed Insights. A free key avoids the shared daily quota." : "Public URL enables tracked links (looi.link/r/…) and lets platforms like Instagram fetch your poster."}>
         {!s.device && (
           <div className="space-y-1.5">
             <Label htmlFor="pub">Public server URL</Label>
@@ -175,15 +197,19 @@ export default function Settings() {
           <Label htmlFor="psi" className="flex items-center justify-between">PageSpeed Insights API key {s.device ? "(recommended)" : "(optional)"} <a href="https://developers.google.com/speed/docs/insights/v5/get-started#APIKey" target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-xs font-normal text-primary">Get a free key <ExternalLink className="size-3" /></a></Label>
           <Input id="psi" type="password" value={psi} onChange={(e) => setPsi(e.target.value)} placeholder={s.hasPsiKey ? "Saved — type to replace" : s.device ? "Paste your Google API key" : "Used only if local Lighthouse fails"} autoComplete="off" data-testid="input-psi-key" />
         </div>
-      </Section>
-      {s.device && (
-        <Section title="Where Looi runs" desc="This app is the agent. Missions, ads and keys live on this device; Android wakes Looi in the background about every 15 minutes to run due checks.">
+      </Section>}
+      {(window as any).__LOOI_SWITCH__ && (
+        <Section title="Where Looi runs" desc={s.device ? "This app is the agent. Missions, ads and keys live on this device; Android wakes Looi in the background about every 15 minutes to run due checks." : "Your missions run 24/7 on the Looi server, even when your phone is off. The app checks in every ~15 minutes to notify you."}>
           <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-card p-4">
-            <div>
-              <p className="text-sm font-medium">On this phone · no server</p>
-              <p className="text-xs text-muted-foreground">Keep battery optimization off for Looi so the OS doesn't delay background runs.</p>
+            <div className="min-w-0">
+              <p className="text-sm font-medium">{s.device ? "On this phone · your own keys" : (window as any).__LOOI__?.server === (window as any).__LOOI_CLOUD__ ? "Looi Cloud" : "Custom server"}</p>
+              <p className="truncate text-xs text-muted-foreground">{s.device ? "Keep battery optimization off for Looi so the OS doesn't delay background runs." : (window as any).__LOOI__?.server}</p>
             </div>
-            {(window as any).__LOOI_SWITCH__ && <Button variant="secondary" size="sm" onClick={() => (window as any).__LOOI_SWITCH__("server")} data-testid="button-switch-server">Use a Looi server instead</Button>}
+            <div className="flex flex-wrap gap-2">
+              {s.device && (window as any).__LOOI_CLOUD__ && <Button size="sm" onClick={() => (window as any).__LOOI_SWITCH__("cloud")} data-testid="button-switch-cloud">Use Looi Cloud</Button>}
+              {!s.device && <Button variant="secondary" size="sm" onClick={() => (window as any).__LOOI_SWITCH__("device")} data-testid="button-switch-device">Run on this phone</Button>}
+              <Button variant="ghost" size="sm" onClick={() => (window as any).__LOOI_SWITCH__("server")} data-testid="button-switch-server">Custom server</Button>
+            </div>
           </div>
         </Section>
       )}

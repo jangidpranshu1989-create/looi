@@ -6,7 +6,8 @@ import { storage } from "../storage";
 import type { Mission, Settings, Creative } from "@shared/schema";
 import { fetchSite, renderSite, runLighthouse, readMediaB64, mediaPath, type SiteData, type RenderData, type LighthouseData } from "./analyze";
 import { buildAdHtml, renderAd, deriveBrand, type AdCopy, type Brand, type FormatKey, type TemplateKey, TEMPLATES } from "./render";
-import { chatJson, builtinAvailable } from "./llm";
+import { chatJson, imageGenAvailable } from "./llm";
+import * as billing from "../billing";
 import { publishTo, captionFor, fetchMetrics } from "./publish";
 import { publishComposio } from "./composio";
 import { exclusive } from "./browser";
@@ -44,7 +45,7 @@ function setStage(job: LiveJob, stage: string, progress: number) {
 }
 
 export function publicBase(st: Settings) {
-  return (st.publicBaseUrl || process.env.LOOI_PUBLIC_URL || "").replace(/\/$/, "");
+  return (st.publicBaseUrl || process.env.LOOI_PUBLIC_URL || process.env.RENDER_EXTERNAL_URL || "").replace(/\/$/, "");
 }
 
 function trackedLink(st: Settings, m: Mission, code: string, source: string) {
@@ -136,7 +137,7 @@ Return JSON:
 }
 
 async function aiVisual(st: Settings, key: string, brief: any, primary: string): Promise<string> {
-  if (!st.aiVisuals || !builtinAvailable()) return "";
+  if (!st.aiVisuals || !imageGenAvailable()) return "";
   const out = `${key}-visual.png`;
   const prompt = `Premium cinematic advertising key visual for "${brief.product?.name}" — ${brief.product?.oneLiner}. Category: ${brief.product?.category}. Abstract, high-end 3D render, soft volumetric light, glossy materials, dominant brand color ${primary}, dark moody background, lots of negative space on the left for headline text. No text, no letters, no logos, no UI screenshots.`;
   await new Promise<void>((res, rej) => {
@@ -167,7 +168,12 @@ function brandFor(m: Mission): Brand {
   };
 }
 
-async function produceCreative(m: Mission, cycle: number, angle: AdCopy & { name?: string }, template: TemplateKey, format: FormatKey): Promise<Creative> {
+async function produceCreative(m: Mission, cycle: number, angle: AdCopy & { name?: string }, template: TemplateKey, format: FormatKey): Promise<Creative | null> {
+  if (!billing.canCreate(m.ownerId)) {
+    storage.addEvent(m.ownerId, m.id, "warn", "Ad skipped: plan limit reached", "Your plan's ad allowance for this period is used up. The agent keeps monitoring and writing playbooks.");
+    if (billing.shouldNoticeLimit(m.ownerId)) storage.notify(m.ownerId, { title: "Ad limit reached", body: "Looi paused new video ads for this period. Upgrade in Billing to keep the agent producing.", kind: "warn", missionId: m.id });
+    return null;
+  }
   const cr = storage.createCreative({ ownerId: m.ownerId, missionId: m.id, cycle, angle: angle.name || "", template, format, copy: JSON.stringify(angle), posterFile: "", videoFile: "", status: "rendering" });
   try {
     const html = buildAdHtml(template, format, brandFor(m), {
@@ -237,7 +243,7 @@ function requestPublish(m: Mission, creatives: Creative[], reason: string) {
     storage.notify(m.ownerId, { title: `${ok.length} new ad${ok.length > 1 ? "s" : ""} ready · ${m.name}`, body: "Connect a channel and attach it to this mission to auto-publish.", kind: "info", missionId: m.id });
     return;
   }
-  if (m.mode === "autopilot") {
+  if (m.mode === "autopilot" && billing.autopilotAllowed(m.ownerId)) {
     storage.addEvent(m.ownerId, m.id, "decision", "Autopilot: publishing without approval", reason);
     void enqueue(m.id, "publish", () => publishCreatives(m.id, ok.map((c) => c.id), readyIds));
     return;
@@ -247,24 +253,38 @@ function requestPublish(m: Mission, creatives: Creative[], reason: string) {
   storage.notify(m.ownerId, { title: "Approval needed", body: `${m.name}: ${ap.title}`, kind: "approval", missionId: m.id, approvalId: ap.id });
 }
 
-// ---------- job queue (serial; heavy work shares 2 CPUs)
-let queue: Promise<unknown> = Promise.resolve();
+// ---------- job queue: small worker pool, paid plans first. Heavy Chromium/ffmpeg work is still serialised by exclusive().
+const WORKERS = Math.max(1, parseInt(process.env.LOOI_WORKERS || "2", 10) || 2);
+type Job = { missionId: number; kind: LiveJob["kind"]; fn: () => Promise<unknown>; prio: number; seq: number; done: () => void };
+const pending: Job[] = [];
 const queued = new Set<number>();
+let running = 0;
+let seq = 0;
+function pump() {
+  while (running < WORKERS && pending.length) {
+    pending.sort((a, b) => b.prio - a.prio || a.seq - b.seq);
+    const j = pending.shift()!;
+    queued.delete(j.missionId);
+    running++;
+    j.fn()
+      .catch((e) => console.error("job failed", e))
+      .finally(() => {
+        running--;
+        j.done();
+        pump();
+      });
+  }
+}
 export function enqueue(missionId: number, kind: LiveJob["kind"], fn: () => Promise<unknown>) {
   if (kind !== "publish") {
     if (queued.has(missionId) || live.has(missionId)) return Promise.resolve();
     queued.add(missionId);
   }
-  const run = queue.then(async () => {
-    queued.delete(missionId);
-    try {
-      await fn();
-    } catch (e) {
-      console.error("job failed", e);
-    }
+  const owner = storage.getMission(missionId)?.ownerId || "";
+  return new Promise<void>((done) => {
+    pending.push({ missionId, kind, fn, prio: (kind === "publish" ? 10 : 0) + (owner ? billing.priorityFor(owner) : 0), seq: seq++, done });
+    pump();
   });
-  queue = run;
-  return run;
 }
 
 // ---------- launch pipeline
@@ -354,12 +374,13 @@ export async function launchMission(missionId: number) {
       job.stage = `Producing ads · ${i + 1}/${plan.length}`;
       job.progress = 70 + Math.round((i / plan.length) * 22);
       storage.updateMission(missionId, { stage: job.stage, progress: job.progress });
-      made.push(await produceCreative(storage.getMission(missionId)!, 0, a, tpl, fmt));
+      const c = await produceCreative(storage.getMission(missionId)!, 0, a, tpl, fmt);
+      if (c) made.push(c);
     }
     storage.addEvent(m.ownerId, m.id, "success", `${made.filter((c) => c.status === "draft").length} production ads rendered`, "MP4 + poster for 1:1, 9:16 and 16:9");
 
     setStage(job, "Publishing", 95);
-    const interval = st.intervalMinutes || 150;
+    const interval = billing.intervalFor(m.ownerId, st.intervalMinutes || 150);
     m = storage.updateMission(missionId, { status: "active", stage: "Monitoring", progress: 100, cycle: 0, lastCheckAt: Date.now(), nextCheckAt: Date.now() + interval * 60000 });
     storage.addSnapshot(m.id, 0, { health, perf: lhM?.scores.performance, seo: lhM?.scores.seo, a11y: lhM?.scores.accessibility, ttfb: site.ttfbMs, clicks: 0 });
     requestPublish(m, made, "Initial launch batch");
@@ -460,20 +481,21 @@ Return JSON:
     if (up && plan.nextAngle) {
       const tpl: TemplateKey = (TEMPLATES as readonly string[]).includes(plan.template) ? plan.template : "kinetic";
       const fmt: FormatKey = ["square", "story", "landscape"].includes(plan.format) ? plan.format : "square";
-      made.push(await produceCreative(m, cycle, plan.nextAngle, tpl, fmt));
+      const c = await produceCreative(m, cycle, plan.nextAngle, tpl, fmt);
+      if (c) made.push(c);
     }
 
     setStage(job, "Reporting", 92);
     const health = computeHealth(site, perf !== undefined ? ({ scores: { performance: perf, accessibility: J(m.report).lighthouse?.mobile?.scores?.accessibility ?? 70, bestPractices: J(m.report).lighthouse?.mobile?.scores?.bestPractices ?? 70, seo: J(m.report).lighthouse?.mobile?.scores?.seo ?? 70 } } as any) : undefined);
     storage.addSnapshot(m.id, cycle, { health, perf, ttfb: site.ttfbMs, clicks: allClicks.length, newClicks: sinceClicks.length, decision: plan.decision });
-    const interval = st.intervalMinutes || 150;
+    const interval = billing.intervalFor(m.ownerId, st.intervalMinutes || 150);
     m = storage.updateMission(missionId, { status: storage.getMission(missionId)!.status === "paused" ? "paused" : "active", cycle, stage: "Monitoring", progress: 100, lastCheckAt: Date.now(), nextCheckAt: Date.now() + interval * 60000, healthScore: health });
     if (made.length) requestPublish(m, made, plan.reasoning || "");
     storage.notify(m.ownerId, { title: `Cycle ${cycle} update · ${m.name}`, body: plan.userUpdate || plan.assessment || "Check complete.", kind: "update", missionId: m.id });
   } catch (e) {
     const msg = String((e as Error).message).slice(0, 400);
     storage.addEvent(m.ownerId, m.id, "error", `Cycle ${cycle} failed`, msg);
-    const interval = st.intervalMinutes || 150;
+    const interval = billing.intervalFor(m.ownerId, st.intervalMinutes || 150);
     storage.updateMission(missionId, { status: "active", stage: "Monitoring", progress: 100, lastError: msg, nextCheckAt: Date.now() + Math.min(interval, 30) * 60000 });
     storage.notify(m.ownerId, { title: `Check failed · ${m.name}`, body: msg + " — retrying soon.", kind: "error", missionId: m.id });
   } finally {
@@ -495,7 +517,7 @@ export async function generateMore(missionId: number) {
     const fmt: FormatKey = (["square", "story", "landscape"] as FormatKey[])[n % 3];
     if (a) {
       const c = await produceCreative(m, m.cycle, a, tpl, fmt);
-      requestPublish(storage.getMission(missionId)!, [c], "Manual generation");
+      if (c) requestPublish(storage.getMission(missionId)!, [c], "Manual generation");
     }
   } finally {
     live.delete(missionId);

@@ -1,6 +1,7 @@
 import { Link, useLocation } from "wouter";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { Bell, LayoutGrid, ShieldCheck, Plug, Settings2, Smartphone, Plus, BellRing } from "lucide-react";
+import { Bell, LayoutGrid, ShieldCheck, Plug, Settings2, Smartphone, Plus, BellRing, CreditCard, Sparkles } from "lucide-react";
+import { useMe, daysLeft } from "@/lib/auth";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Button } from "@/components/ui/button";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -14,7 +15,55 @@ const NAV = [
   { href: "/app/approvals", label: "Approvals", icon: ShieldCheck, badge: true },
   { href: "/app/channels", label: "Plugins", icon: Plug },
   { href: "/app/settings", label: "Settings", icon: Settings2 },
+  { href: "/app/billing", label: "Billing", icon: CreditCard, saas: true },
 ];
+
+/** Plan + usage card for Looi Cloud accounts. */
+function PlanCard() {
+  const { data: me } = useMe();
+  const u = me?.user;
+  if (!me?.saas || !u) return null;
+  const pct = Math.min(100, Math.round((u.usage.creatives / Math.max(1, u.plan.creatives)) * 100));
+  const unlimited = u.plan.creatives >= 1e8;
+  return (
+    <Link href="/app/billing">
+      <div className="rounded-lg border border-border bg-card p-3 text-xs hover-elevate" data-testid="card-plan">
+        <div className="flex items-center justify-between">
+          <span className="font-semibold text-foreground">{u.plan.label}</span>
+          {u.plan.key === "trial" && <span className="font-mono text-[10px] text-primary">{daysLeft(u.trialEndsAt)}d left</span>}
+          {u.plan.key === "free" && (
+            <span className="inline-flex items-center gap-1 text-[11px] font-medium text-primary">
+              <Sparkles className="size-3" /> Upgrade
+            </span>
+          )}
+        </div>
+        {!unlimited && (
+          <>
+            <div className="mt-2 h-1 overflow-hidden rounded-full bg-muted">
+              <div className={cn("h-full rounded-full", pct >= 90 ? "bg-bad" : "bg-primary")} style={{ width: `${pct}%` }} />
+            </div>
+            <p className="mt-1.5 text-muted-foreground">
+              {u.usage.creatives} / {u.plan.creatives} ads this period
+            </p>
+          </>
+        )}
+      </div>
+    </Link>
+  );
+}
+
+function AccountButton() {
+  const { data: me } = useMe();
+  if (!me?.saas || !me.user) return null;
+  const initial = (me.user.name || me.user.email).trim().charAt(0).toUpperCase();
+  return (
+    <Link href="/app/billing">
+      <span className="ml-1 grid size-8 place-items-center rounded-full bg-primary/15 text-xs font-semibold text-primary hover-elevate" aria-label="Account and billing" data-testid="button-account">
+        {initial}
+      </span>
+    </Link>
+  );
+}
 
 function NotificationCenter() {
   const { data: live } = useLive();
@@ -73,6 +122,7 @@ export function AppShell({ children, title, actions }: { children: React.ReactNo
   const [path] = useLocation();
   const { data: live } = useLive();
   const pending = live?.approvals?.length || 0;
+  const { data: me } = useMe();
   return (
     <div className="flex min-h-dvh bg-background">
       <LivePill />
@@ -86,7 +136,7 @@ export function AppShell({ children, title, actions }: { children: React.ReactNo
           </Button>
         </Link>
         <nav className="mt-6 space-y-0.5">
-          {NAV.map((n) => {
+          {NAV.filter((n: any) => !n.saas || me?.saas).map((n) => {
             const active = n.match ? n.match(path) : path === n.href;
             return (
               <Link key={n.href} href={n.href}>
@@ -100,6 +150,7 @@ export function AppShell({ children, title, actions }: { children: React.ReactNo
           })}
         </nav>
         <div className="mt-auto space-y-3">
+          <PlanCard />
           <Link href="/download">
             <span className="flex items-center gap-2.5 rounded-md px-2.5 py-2 text-sm text-muted-foreground hover-elevate" data-testid="nav-download">
               <Smartphone className="size-4" /> Get the app
@@ -123,6 +174,7 @@ export function AppShell({ children, title, actions }: { children: React.ReactNo
           <div className="ml-auto flex items-center gap-1">
             {actions}
             <NotificationCenter />
+            <AccountButton />
           </div>
         </header>
         <main className="mx-auto w-full max-w-6xl flex-1 px-4 pb-28 pt-6 md:px-8 md:pb-12">{children}</main>

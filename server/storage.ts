@@ -9,8 +9,23 @@ import path from "node:path";
 export const DATA_DIR = process.env.LOOI_DATA_DIR || path.resolve("looi-data");
 fs.mkdirSync(path.join(DATA_DIR, "media"), { recursive: true });
 
-const sqlite = new Database(process.env.LOOI_DB || "data.db");
+export const sqlite = new Database(process.env.LOOI_DB || "data.db");
 sqlite.pragma("journal_mode = WAL");
+sqlite.pragma("busy_timeout = 5000");
+
+/** Create any missing tables from the shipped migration (safe to run on every boot, no drizzle-kit needed). */
+(function bootstrapSchema() {
+  const dir = path.resolve(process.env.LOOI_MIGRATIONS || "migrations");
+  if (!fs.existsSync(dir)) return;
+  for (const f of fs.readdirSync(dir).filter((x) => x.endsWith(".sql")).sort()) {
+    for (const stmt of fs.readFileSync(path.join(dir, f), "utf8").split("--> statement-breakpoint")) {
+      const q = stmt.trim().replace(/^CREATE TABLE /i, "CREATE TABLE IF NOT EXISTS ").replace(/^CREATE (UNIQUE )?INDEX /i, (_m, u) => `CREATE ${u || ""}INDEX IF NOT EXISTS `);
+      if (q) sqlite.exec(q);
+    }
+  }
+  for (const [t, c] of [["missions", "owner_id"], ["missions", "status"], ["creatives", "owner_id, created_at"], ["creatives", "mission_id"], ["events", "mission_id"], ["notifications", "owner_id"], ["posts", "mission_id"], ["channels", "owner_id"], ["approvals", "owner_id"], ["snapshots", "mission_id"], ["playbooks", "mission_id"], ["clicks", "link_code"]])
+    sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_${t}_${c.replace(/[^a-z]+/g, "_")} ON ${t}(${c})`);
+})();
 export const db = drizzle(sqlite);
 
 const now = () => Date.now();

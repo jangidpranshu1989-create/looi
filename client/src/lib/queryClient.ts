@@ -1,4 +1,5 @@
 import { QueryClient, QueryFunction } from "@tanstack/react-query";
+import { getToken, setToken } from "./auth";
 
 const BUILT_BASE = "__PORT_5000__".startsWith("__") ? "" : "__PORT_5000__";
 
@@ -35,6 +36,8 @@ function headers(json: boolean): Record<string, string> {
   if (json) h["Content-Type"] = "application/json";
   const d = typeof window !== "undefined" ? window.__LOOI__?.device : "";
   if (d) h["X-Looi-Device"] = d;
+  const t = getToken();
+  if (t) h["Authorization"] = `Bearer ${t}`;
   return h;
 }
 export const mediaUrl = (file?: string, download = false) => {
@@ -43,7 +46,15 @@ export const mediaUrl = (file?: string, download = false) => {
   return `${apiBase()}/api/media/${file}${download ? "?download=1" : ""}`;
 };
 
+/** Signed-out on a Looi Cloud server → go to sign-in. */
+function onUnauthorized(res: Response) {
+  if (res.status !== 401 || local) return;
+  setToken("");
+  const h = typeof window !== "undefined" ? window.location.hash : "";
+  if (/^#\/app/.test(h) || (window.__LOOI__?.native && !/#\/(login|signup)/.test(h))) window.location.hash = "#/login";
+}
 async function throwIfResNotOk(res: Response) {
+  onUnauthorized(res);
   if (!res.ok) {
     const text = (await res.text()) || res.statusText;
     let msg = text;
