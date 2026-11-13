@@ -1,0 +1,9 @@
+node_modules
+dist
+looi-data
+data.db*
+native/node_modules
+native/android
+native/ios
+native/www
+*.log

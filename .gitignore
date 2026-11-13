@@ -1,0 +1,17 @@
+node_modules
+dist
+.DS_Store
+server/public
+vite.config.ts.*
+*.tar.gz
+data.db*
+looi-data
+*.log
+native/node_modules
+native/www
+native/android
+native/ios
+.vite/
+.env
+.env.*
+!.env.example

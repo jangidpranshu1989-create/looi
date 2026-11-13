@@ -1,0 +1,26 @@
+{
+  "name": "looi-native",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Looi native app (Android + iOS) — Capacitor shell around the Looi web client with background checks and local notifications.",
+  "scripts": {
+    "web": "cd .. && npm run build && cd native && node scripts/sync-web.mjs",
+    "sync": "npm run web && npx cap sync",
+    "android:add": "npx cap add android",
+    "android:apk": "npm run sync && cd android && ./gradlew assembleDebug && echo APK: android/app/build/outputs/apk/debug/app-debug.apk",
+    "android:release": "npm run sync && cd android && ./gradlew bundleRelease",
+    "ios": "npm run sync && npx cap open ios"
+  },
+  "dependencies": {
+    "@capacitor/android": "^7.4.0",
+    "@capacitor/app": "^7.0.1",
+    "@capacitor/background-runner": "^2.2.0",
+    "@capacitor/core": "^7.4.0",
+    "@capacitor/ios": "^7.4.0",
+    "@capacitor/local-notifications": "^7.0.1",
+    "@capacitor/preferences": "^7.0.1"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^7.4.0"
+  }
+}

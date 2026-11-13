@@ -1,0 +1,19 @@
+{
+  "appId": "app.looi.agent",
+  "appName": "Looi",
+  "webDir": "www",
+  "backgroundColor": "#0b0b0d",
+  "server": { "androidScheme": "https", "cleartext": true },
+  "android": { "allowMixedContent": true },
+  "plugins": {
+    "LocalNotifications": { "smallIcon": "ic_stat_icon", "iconColor": "#D4FF3A" },
+    "BackgroundRunner": {
+      "label": "app.looi.agent.check",
+      "src": "runners/looi-runner.js",
+      "event": "looiCheck",
+      "repeat": true,
+      "interval": 15,
+      "autoStart": true
+    }
+  }
+}
