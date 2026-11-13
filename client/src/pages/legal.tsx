@@ -1,14 +1,14 @@
 import { Link } from "wouter";
 import { Wordmark } from "@/components/looi";
-import { SUPPORT_EMAIL, GITHUB_URL } from "@/lib/config";
+import { SUPPORT_EMAIL, GITHUB_URL, SUPPORT_PHONE_DISPLAY } from "@/lib/config";
 
 const PRIVACY: [string, string][] = [
   ["What we collect", "Your email address, name and a salted hash of your password. The URLs you submit, the screenshots, audit results and ads Looi creates for them. The social and app accounts you connect through Composio, and the posts Looi publishes for you. Basic request logs (time, IP address, user agent) to keep the service secure."],
   ["How we use it", "Only to run your missions: audit your site, write and render ads, publish to the channels you choose, measure results and notify you. We don't sell your data and we don't use it to train AI models."],
-  ["Who processes it", "AI requests go to our model providers (such as Groq or NVIDIA NIM). Site speed tests use Google PageSpeed Insights. Publishing goes through Composio to the platforms you connect. Payments are handled by Razorpay; Looi never sees your card or UPI details."],
+  ["Who processes it", "AI requests go to our model providers (such as Groq or NVIDIA NIM). Site speed tests use Google PageSpeed Insights. Publishing goes through Composio to the platforms you connect. Payments are made by UPI directly to Looi's UPI ID; we store only the plan, amount and the UPI reference number (UTR) you submit, to verify the payment."],
   ["Notifications", "The mobile app shows notifications for mission updates and approvals. You can switch them off in your phone's settings at any time."],
   ["Retention and deletion", "Your data stays until you delete it. Delete a mission to remove its ads and history, or delete your whole account from Billing → Delete account. Deletion is immediate and permanent."],
-  ["Contact", `Questions or data requests: ${SUPPORT_EMAIL}.`],
+  ["Contact", `Questions, payment issues or data requests: ${SUPPORT_EMAIL} · WhatsApp ${SUPPORT_PHONE_DISPLAY}.`],
 ];
 const TERMS: [string, string][] = [
   ["The service", "Looi is an AI marketing agent. It analyses websites you own or are allowed to promote, creates ads and publishes them to channels you connect."],

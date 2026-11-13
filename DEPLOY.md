@@ -1,53 +1,98 @@
-# Deploying Looi Cloud (Hindi/English quick guide)
+# Deploying Looi Cloud on Cloudflare
 
-Goal: Looi runs on **your** server with **your** AI keys, so users only sign up and paste a URL. Free 7-day trial, then Free / Pro (₹999) / Scale (₹2,999) via Razorpay.
+Goal: Looi runs on **your** Cloudflare account with **your** AI keys, so users only sign up and paste a URL. 7-day free trial, then Free / Pro (₹999) / Scale (₹2,999), paid by UPI.
 
-## 1. Server (Render, ~10 minutes)
+## How it runs
 
-1. Open **https://render.com/deploy?repo=https://github.com/jangidpranshu1989-create/looi** (sign in with GitHub).
-2. Render reads `render.yaml`: Docker web service `looi`, region Singapore, plan **Standard (2 GB RAM, ~$25/mo)**, 10 GB disk at `/app/looi-data` (~$2.50/mo).
-   Starter (512 MB) is too small for Chromium + FFmpeg video rendering; free instances sleep and lose data.
-3. Paste the secret values when Render asks:
-   - `GROQ_API_KEY` — https://console.groq.com/keys (use the paid Dev tier once you have users; free limits are low)
-   - `NVIDIA_API_KEY` — https://build.nvidia.com (automatic failover)
-   - `COMPOSIO_API_KEY` — https://platform.composio.dev (one-click publishing plugins)
-   - `PSI_API_KEY` — Google PageSpeed Insights key
-   - `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET` — dashboard.razorpay.com → Settings → API keys (use Live keys after KYC)
-   - `RAZORPAY_WEBHOOK_SECRET` — any strong string; use the same in Razorpay → Webhooks
-   - `ADMIN_EMAILS` — your email (gets the unlimited plan)
-   - `LOOI_PUBLIC_URL` — leave empty for `*.onrender.com`; set it when you add a custom domain
-4. Deploy. Health check: `https://<service>.onrender.com/api/health`.
-5. Razorpay → Webhooks → `https://<your-domain>/api/billing/webhook`, events `payment.captured`, `order.paid`, same secret.
-6. Custom domain (optional): Render → Settings → Custom Domains → add `looi.yourdomain.com`, set the CNAME, then set `LOOI_PUBLIC_URL`.
+```
+Browser / Android app
+      │
+Cloudflare Worker (edge) ── static web app (Workers Static Assets)
+      │                 └── /api/media/* served straight from R2
+      ▼
+Cloudflare Container "LooiServer" (1 always-on instance, standard-2: 1 vCPU · 6 GiB · 12 GB)
+  Node API · 24/7 agent loop (re-check every 2–3 h) · Chromium audits · FFmpeg MP4 ads
+      │
+R2 bucket "looi-data"  ── SQLite snapshot every 60 s + daily copies · all media
+Cron every 2 min ── keeps the agent awake, restarts it after host maintenance
+```
 
-Every push to `main` redeploys automatically.
+Container disks are temporary, so the DB is restored from R2 on every boot (`script/r2-restore.mjs`) and flushed on shutdown. At most ~60 s of data can be lost on a hard crash.
 
-## 2. Android app pointing at your cloud
+## 1. Cloudflare (one time, ~10 minutes)
 
-1. GitHub repo → Settings → Secrets and variables → Actions:
-   - Variable `LOOI_CLOUD_URL` = your server URL
-   - Secrets `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS` (`looi`)
-2. Actions → **Android APK** → Run workflow (or push a tag `v1.0.1`). The signed `Looi.apk` and `Looi.aab` appear under Releases.
-3. Google Play: upload `Looi.aab` in Play Console (one-time $25). Keep the keystore safe — every update must use the same key.
+1. Sign up at https://dash.cloudflare.com and buy **Workers Paid** ($5/month) — Containers need it.
+2. **API token**: My Profile → API Tokens → Create Token → template **Edit Cloudflare Workers** → add permissions **Account · Workers R2 Storage · Edit** and **Account · Containers · Edit** → Create. Copy the token.
+3. **Account ID**: Workers & Pages overview, right sidebar.
 
-## 3. Other hosts
+## 2. GitHub secrets
 
-Any Docker host with 2 GB+ RAM works (Hetzner/DigitalOcean VPS, Railway, Fly.io, Coolify):
+https://github.com/jangidpranshu1989-create/looi/settings/secrets/actions → New repository secret:
+
+| Secret | Value |
+|---|---|
+| `CLOUDFLARE_API_TOKEN` | token from step 1.2 |
+| `CLOUDFLARE_ACCOUNT_ID` | account ID from step 1.3 |
+| `NVIDIA_API_KEY` | https://build.nvidia.com (primary brain) |
+| `GROQ_API_KEY` | https://console.groq.com/keys (instant failover — use the paid tier once you have users) |
+| `COMPOSIO_API_KEY` | https://platform.composio.dev (one-click publishing plugins) |
+| `PSI_API_KEY` | Google PageSpeed Insights key |
+| `ADMIN_EMAILS` | `jangid.pranshu1989@gmail.com,lumora.web.co@gmail.com` |
+| `LOOI_PUBLIC_URL` | optional — only when you add a custom domain |
+
+## 3. Deploy
+
+Actions → **Deploy to Cloudflare** → Run workflow. It builds the web app and the Docker image, creates the R2 bucket on first run, uploads secrets and deploys. Every push to `main` redeploys.
+
+Your app: `https://looi.<your-subdomain>.workers.dev` (shown at the end of the log). Health: `/api/health`. The first boot takes ~1 minute.
+
+**Immediately sign up with an `ADMIN_EMAILS` address** — admins get the unlimited plan and the payment verification screen.
+
+Custom domain: Workers & Pages → looi → Settings → Domains & Routes → add `looi.yourdomain.com`.
+
+## 4. Payments (UPI + UTR)
+
+1. User picks Pro/Scale → Looi creates an order with a unique amount (e.g. ₹999.37) and reference `LOOI…`.
+2. Mobile: **Pay with UPI app** deep link (`upi://pay?pa=8529418454@fam…`). Desktop: QR code. UPI ID / amount can be copied.
+3. User pastes the 12-digit **UTR** from their UPI app. Duplicate UTRs are refused. The plan unlocks **provisionally for 48 h** (`LOOI_PROVISIONAL_HOURS`); accounts that had a UTR rejected before must wait.
+4. You open **/app/admin**, match amount + UTR in your FamPay history and press **Approve** (30 days activated) or **Reject** (plan reverts). Both sides get notifications.
+
+Important: personal (P2P) UPI IDs have no API, so no software can verify a UTR automatically — the admin check is the verification. Some UPI apps block P2P links with a pre-filled amount, and personal IDs have daily limits. For volume, get a free **UPI merchant / business QR** (Paytm Business, PhonePe Business, BharatPe) and set `LOOI_UPI_ID` to it in `cloudflare/wrangler.jsonc`.
+
+Support contact shown in the app: jangid.pranshu1989@gmail.com · WhatsApp +91 85294 18454.
+
+## 5. AI failover
+
+Order `LOOI_AI_ORDER=custom,nvidia,groq,openai`. NVIDIA NIM answers first; any error, rate limit, timeout (`LOOI_NIM_TIMEOUT_MS`, 45 s) or empty reply switches to Groq in the same request, and NIM is skipped for 3 minutes (`LOOI_AI_COOLDOWN_MS`) so users never wait on a broken provider. If every key fails, the built-in rules engine still produces copy.
+
+## 6. Cost (always-on, 24/7)
+
+| Item | Monthly |
+|---|---|
+| Workers Paid | $5 |
+| Container standard-2 (6 GiB memory always on, CPU billed by actual use) | ~$45–55 |
+| R2 (first 10 GB free) | ~$0–2 |
+| **Total** | **~$50–60** |
+
+To save ~40% use `"instance_type": "standard-1"` (½ vCPU, 4 GiB) in `cloudflare/wrangler.jsonc` — fine for a few users, slower video renders. Pricing: https://developers.cloudflare.com/containers/platform/pricing/
+
+## 7. Android app pointing at your cloud
+
+1. Repo → Settings → Secrets and variables → Actions → **Variables** → `LOOI_CLOUD_URL` = your workers.dev URL.
+2. Actions → **Android APK** → Run workflow. The signed `Looi.apk` and `Looi.aab` appear under Releases (the web app's Download page links to the latest one).
+3. Google Play: upload `Looi.aab` (one-time $25). Keep the keystore safe — every update must use the same key.
+
+## 8. Other hosts
+
+Any Docker host with 2 GB+ RAM works (VPS, Railway, Fly.io, Coolify):
 
 ```bash
 cp .env.example .env    # fill in
 docker build -t looi . && docker run -d --restart=always -p 5000:5000 --env-file .env -v looi-data:/app/looi-data looi
 ```
 
-Put Caddy or Nginx in front for HTTPS.
+## 9. Before going big
 
-## 4. Admin
-
-- `GET /api/admin/stats` (admin token) — users, paid users, revenue, missions.
-- `POST /api/admin/grant {email, plan, days}` — give someone Pro/Scale manually.
-
-## 5. Before going big
-
-- Move Groq to a paid tier; free limits get hit quickly with many users.
-- Back up `/app/looi-data` (Render disk snapshots are daily).
-- Not built yet: password-reset email, Google sign-in, abuse checks for repeated trials.
+- Move Groq to a paid tier; free limits get hit quickly.
+- R2 keeps daily DB copies under `db/daily/` — download one now and then.
+- Not built yet: password-reset email, email verification, Google sign-in.

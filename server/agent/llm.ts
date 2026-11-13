@@ -28,15 +28,25 @@ const anthropicAvailable = () => !!(process.env.ANTHROPIC_API_KEY || process.env
  * "Looi AI" — the AI engine the server owner pays for, so users never need a key.
  * Tried in order; on rate limits / errors the next one takes over.
  */
-interface House { label: string; baseUrl: string; apiKey: string; model: string }
+interface House { key: string; label: string; baseUrl: string; apiKey: string; model: string; timeoutMs: number }
 function houseProviders(): House[] {
   const e = process.env;
-  const out: House[] = [];
-  if (e.LOOI_AI_BASE_URL && e.LOOI_AI_KEY) out.push({ label: "Looi AI", baseUrl: e.LOOI_AI_BASE_URL, apiKey: e.LOOI_AI_KEY, model: e.LOOI_AI_MODEL || "gpt-4.1-mini" });
-  if (e.GROQ_API_KEY) out.push({ label: "Looi AI (Groq)", baseUrl: PROVIDERS.groq.baseUrl, apiKey: e.GROQ_API_KEY, model: e.GROQ_MODEL || PROVIDERS.groq.defaultModel });
-  if (e.NVIDIA_API_KEY) out.push({ label: "Looi AI (NIM)", baseUrl: PROVIDERS.nvidia.baseUrl, apiKey: e.NVIDIA_API_KEY, model: e.NVIDIA_MODEL || PROVIDERS.nvidia.defaultModel });
-  if (e.OPENAI_API_KEY) out.push({ label: "Looi AI (OpenAI)", baseUrl: PROVIDERS.openai.baseUrl, apiKey: e.OPENAI_API_KEY, model: e.OPENAI_MODEL || PROVIDERS.openai.defaultModel });
-  return out;
+  const all: Record<string, House | null> = {
+    custom: e.LOOI_AI_BASE_URL && e.LOOI_AI_KEY ? { key: "custom", label: "Looi AI", baseUrl: e.LOOI_AI_BASE_URL, apiKey: e.LOOI_AI_KEY, model: e.LOOI_AI_MODEL || "gpt-4.1-mini", timeoutMs: 90_000 } : null,
+    nvidia: e.NVIDIA_API_KEY ? { key: "nvidia", label: "Looi AI (NIM)", baseUrl: e.NVIDIA_BASE_URL || PROVIDERS.nvidia.baseUrl, apiKey: e.NVIDIA_API_KEY, model: e.NVIDIA_MODEL || PROVIDERS.nvidia.defaultModel, timeoutMs: Number(e.LOOI_NIM_TIMEOUT_MS) || 45_000 } : null,
+    groq: e.GROQ_API_KEY ? { key: "groq", label: "Looi AI (Groq)", baseUrl: e.GROQ_BASE_URL || PROVIDERS.groq.baseUrl, apiKey: e.GROQ_API_KEY, model: e.GROQ_MODEL || PROVIDERS.groq.defaultModel, timeoutMs: 90_000 } : null,
+    openai: e.OPENAI_API_KEY ? { key: "openai", label: "Looi AI (OpenAI)", baseUrl: PROVIDERS.openai.baseUrl, apiKey: e.OPENAI_API_KEY, model: e.OPENAI_MODEL || PROVIDERS.openai.defaultModel, timeoutMs: 90_000 } : null,
+  };
+  // Default: NVIDIA NIM first, Groq takes over instantly on any NIM error, rate limit, empty reply or timeout.
+  const order = (e.LOOI_AI_ORDER || "custom,nvidia,groq,openai").split(",").map((x) => x.trim());
+  return order.map((k) => all[k]).filter(Boolean) as House[];
+}
+/** Circuit breaker: a provider that just failed is skipped for a few minutes so requests go straight to the next one. */
+const tripped = new Map<string, number>();
+const COOLDOWN_MS = Number(process.env.LOOI_AI_COOLDOWN_MS) || 3 * 60_000;
+export function houseStatus() {
+  const now = Date.now();
+  return houseProviders().map((h) => ({ provider: h.key, model: h.model, healthy: (tripped.get(h.key) || 0) < now }));
 }
 export function builtinAvailable() {
   return houseProviders().length > 0 || anthropicAvailable();
@@ -47,19 +57,28 @@ export function imageGenAvailable() {
 }
 async function callHouse(messages: Msg[], o: ChatOpts): Promise<{ text: string; via: string }> {
   let last: unknown;
-  for (const h of houseProviders()) {
+  const list = houseProviders();
+  const now = Date.now();
+  // healthy providers first (in order), then tripped ones as a last resort
+  const ordered = [...list.filter((h) => (tripped.get(h.key) || 0) < now), ...list.filter((h) => (tripped.get(h.key) || 0) >= now)];
+  for (const h of ordered) {
     try {
       const st = { provider: "custom", baseUrl: h.baseUrl, apiKey: h.apiKey, model: h.model } as Settings;
-      return { text: await callCompatible(st, messages, o), via: h.label };
+      const text = await callCompatible(st, messages, o, h.timeoutMs);
+      if (!text.trim()) throw new Error(`${h.label} returned an empty reply`);
+      tripped.delete(h.key);
+      return { text, via: h.label };
     } catch (e) {
       last = e;
+      tripped.set(h.key, Date.now() + COOLDOWN_MS);
+      console.warn(`[looi-ai] ${h.label} failed, switching: ${String((e as any)?.message || e).slice(0, 160)}`);
     }
   }
   if (anthropicAvailable()) return { text: await callBuiltin(messages, o), via: "Looi AI" };
   throw last || new Error("Looi AI is not configured on this server.");
 }
 
-async function callCompatible(st: Settings, messages: Msg[], o: ChatOpts) {
+async function callCompatible(st: Settings, messages: Msg[], o: ChatOpts, timeoutMs = 120_000) {
   const p = PROVIDERS[st.provider];
   const base = (st.baseUrl || p?.baseUrl || "").replace(/\/$/, "");
   const model = st.model || p?.defaultModel;
@@ -76,7 +95,7 @@ async function callCompatible(st: Settings, messages: Msg[], o: ChatOpts) {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${st.apiKey}` },
       body: JSON.stringify(b),
-      signal: AbortSignal.timeout(120_000),
+      signal: AbortSignal.timeout(timeoutMs),
     });
   let res = await doFetch(body);
   if (!res.ok && o.json && res.status === 400) {

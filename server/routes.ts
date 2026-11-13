@@ -5,6 +5,7 @@ import path from "node:path";
 import { storage } from "./storage";
 import { insertMissionSchema, updateSettingsSchema } from "@shared/schema";
 import { normalizeUrl, mediaPath } from "./agent/analyze";
+import { ensureMedia, startPersistence } from "./persist";
 import { PROVIDERS, testProvider, listModels, builtinAvailable } from "./agent/llm";
 import { CHANNEL_TYPES, verifyChannel } from "./agent/publish";
 import { FORMATS, TEMPLATES } from "./agent/render";
@@ -75,6 +76,13 @@ function missionOut(m: any) {
 }
 
 export async function registerRoutes(httpServer: Server, app: Express): Promise<Server> {
+  startPersistence();
+  // Behind the Cloudflare Worker: learn the public origin from the first real request (tracked links, OAuth callbacks)
+  app.use((req, _res, next) => {
+    const o = req.header("x-looi-origin");
+    if (o && !process.env.LOOI_PUBLIC_URL && /^https:\/\/[a-z0-9.-]+$/i.test(o)) process.env.LOOI_PUBLIC_URL = o;
+    next();
+  });
   app.use((req, res, next) => {
     res.setHeader("Access-Control-Allow-Origin", "*");
     res.setHeader("Access-Control-Allow-Headers", "Content-Type, X-Looi-Device, Authorization");
@@ -452,10 +460,10 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   });
 
   // ---------- media
-  const sendMedia = (req: Request, res: Response) => {
+  const sendMedia = async (req: Request, res: Response) => {
     const f = path.basename(String(req.params.file));
     const p = mediaPath(f);
-    if (!fs.existsSync(p)) return res.status(404).end();
+    if (!fs.existsSync(p) && !(await ensureMedia(f))) return res.status(404).end();
     if (req.query.download) res.setHeader("Content-Disposition", `attachment; filename="looi-${f}"`);
     res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
     res.sendFile(p);

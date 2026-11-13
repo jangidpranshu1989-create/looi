@@ -1,0 +1,18 @@
+{
+  "name": "looi-cloudflare",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "deploy": "cd .. && npm run build && cd cloudflare && wrangler deploy",
+    "types": "wrangler types",
+    "check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@cloudflare/containers": "^0.3.7"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20261113.1",
+    "typescript": "^5.6.0",
+    "wrangler": "^4.161.0"
+  }
+}

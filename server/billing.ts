@@ -1,5 +1,5 @@
 /**
- * Looi Cloud — accounts, freemium plans, usage limits and Razorpay payments.
+ * Looi Cloud — accounts, freemium plans, usage limits and UPI payments (deep link + UTR verification).
  *
  * Enabled when LOOI_SAAS=1. When disabled (self-hosting for yourself) every
  * request is the single "local" owner with unlimited usage.
@@ -72,6 +72,12 @@ CREATE TABLE IF NOT EXISTS payments (
 );
 CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
 `);
+for (const [c, d] of [["utr_at", "INTEGER NOT NULL DEFAULT 0"], ["note", "TEXT NOT NULL DEFAULT ''"], ["prev_plan", "TEXT NOT NULL DEFAULT ''"], ["prev_until", "INTEGER NOT NULL DEFAULT 0"], ["prev_start", "INTEGER NOT NULL DEFAULT 0"], ["provisional", "INTEGER NOT NULL DEFAULT 0"]]) {
+  try {
+    sqlite.exec(`ALTER TABLE payments ADD COLUMN ${c} ${d}`);
+  } catch {}
+}
+sqlite.exec("CREATE INDEX IF NOT EXISTS idx_payments_status ON payments(status); CREATE INDEX IF NOT EXISTS idx_payments_utr ON payments(payment_id);");
 
 interface UserRow {
   id: number;
@@ -190,25 +196,72 @@ export function priorityFor(owner: string) {
   return planFor(owner).plan.priority;
 }
 
-// ---------- Razorpay
-const RZP_ID = process.env.RAZORPAY_KEY_ID || "";
-const RZP_SECRET = process.env.RAZORPAY_KEY_SECRET || "";
-const RZP_WEBHOOK = process.env.RAZORPAY_WEBHOOK_SECRET || "";
-const paymentsEnabled = () => !!(RZP_ID && RZP_SECRET);
+// ---------- UPI payments (deep link / QR + UTR verification)
+export const UPI_ID = process.env.LOOI_UPI_ID || "8529418454@fam";
+const UPI_NAME = process.env.LOOI_UPI_NAME || "Looi";
+export const SUPPORT = { email: process.env.LOOI_SUPPORT_EMAIL || "jangid.pranshu1989@gmail.com", whatsapp: process.env.LOOI_SUPPORT_WHATSAPP || "918529418454" };
+const PROVISIONAL_MS = Math.max(0, Number(process.env.LOOI_PROVISIONAL_HOURS ?? 48)) * 3600_000;
+const ORDER_TTL = 48 * 3600_000;
+const paymentsEnabled = () => !!UPI_ID;
 
-function activate(userId: number, plan: "pro" | "scale", orderId: string, paymentId: string) {
-  const p = sqlite.prepare("SELECT * FROM payments WHERE order_id = ?").get(orderId) as any;
-  if (!p || p.status === "paid") return false;
-  const u = getUser(userId);
-  if (!u) return false;
+interface PayRow {
+  id: number; user_id: number; order_id: string; payment_id: string; plan: "pro" | "scale"; amount: number; status: string;
+  created_at: number; paid_at: number; utr_at: number; note: string; prev_plan: string; prev_until: number; prev_start: number; provisional: number;
+}
+const upiUrl = (p: PayRow) =>
+  `upi://pay?pa=${encodeURIComponent(UPI_ID)}&pn=${encodeURIComponent(UPI_NAME)}&am=${(p.amount / 100).toFixed(2)}&cu=INR&tn=${encodeURIComponent(p.order_id)}`;
+const publicPayment = (p: PayRow) => ({
+  id: p.id, orderId: p.order_id, plan: p.plan, amount: p.amount, amountInr: (p.amount / 100).toFixed(2), status: p.status, utr: p.payment_id,
+  createdAt: p.created_at, utrAt: p.utr_at, paidAt: p.paid_at, note: p.note, provisional: !!p.provisional,
+  expiresAt: p.created_at + ORDER_TTL, upiUrl: upiUrl(p), vpa: UPI_ID, payee: UPI_NAME,
+});
+function notify(userId: number, title: string, body: string, kind = "info") {
+  try {
+    sqlite.prepare("INSERT INTO notifications (owner_id,mission_id,approval_id,ts,kind,title,body,read) VALUES (?,?,?,?,?,?,?,0)").run(`u-${userId}`, 0, 0, Date.now(), kind, title, body);
+  } catch {}
+}
+function notifyAdmins(title: string, body: string) {
+  for (const email of ADMINS) {
+    const a = sqlite.prepare("SELECT id FROM users WHERE email=?").get(email) as { id: number } | undefined;
+    if (a) notify(a.id, title, body, "approval");
+  }
+}
+/** Pick an amount with unique paise so each open order is easy to match in the UPI app history. */
+function uniqueAmount(base: number) {
+  const open = new Set((sqlite.prepare("SELECT amount FROM payments WHERE status IN ('created','submitted') AND created_at > ?").all(Date.now() - ORDER_TTL) as any[]).map((r) => r.amount));
+  for (let i = 0; i < 200; i++) {
+    const a = base * 100 + 1 + crypto.randomInt(99);
+    if (!open.has(a)) return a;
+  }
+  return base * 100 + crypto.randomInt(100);
+}
+const newRef = () => "LOOI" + crypto.randomBytes(4).toString("hex").toUpperCase().slice(0, 6);
+
+/** Final activation after the admin verifies the UTR in the UPI app. */
+function approve(p: PayRow, by = "admin") {
+  const u = getUser(p.user_id);
+  if (!u || p.status === "paid") return false;
   const now = Date.now();
-  // extend from the current paid-until if still active on the same plan, otherwise start now
-  const from = u.plan === plan && u.plan_until > now ? u.plan_until : now;
-  const start = u.plan === plan && u.plan_until > now ? u.plan_start || now : now;
+  // build on the plan the user had *before* any provisional access
+  const basePlan = p.provisional ? p.prev_plan : u.plan;
+  const baseUntil = p.provisional ? p.prev_until : u.plan_until;
+  const baseStart = p.provisional ? p.prev_start : u.plan_start;
+  const same = basePlan === p.plan && baseUntil > now;
   sqlite.transaction(() => {
-    sqlite.prepare("UPDATE payments SET status='paid', payment_id=?, paid_at=? WHERE order_id=?").run(paymentId, now, orderId);
-    sqlite.prepare("UPDATE users SET plan=?, plan_until=?, plan_start=?, limit_notice=0 WHERE id=?").run(plan, from + PERIOD, start, userId);
+    sqlite.prepare("UPDATE payments SET status='paid', paid_at=?, note=? WHERE id=?").run(now, `verified by ${by}`, p.id);
+    sqlite.prepare("UPDATE users SET plan=?, plan_until=?, plan_start=?, limit_notice=0 WHERE id=?").run(p.plan, (same ? baseUntil : now) + PERIOD, same ? baseStart || now : now, u.id);
   })();
+  notify(u.id, `${PLANS[p.plan].label} is active`, `Payment ${p.order_id} (UTR ${p.payment_id}) verified. Thanks for backing Looi.`, "success");
+  return true;
+}
+function reject(p: PayRow, reason: string) {
+  const u = getUser(p.user_id);
+  if (!u || p.status === "paid" || p.status === "rejected") return false;
+  sqlite.transaction(() => {
+    sqlite.prepare("UPDATE payments SET status='rejected', note=? WHERE id=?").run(reason.slice(0, 300), p.id);
+    if (p.provisional) sqlite.prepare("UPDATE users SET plan=?, plan_until=?, plan_start=? WHERE id=?").run(p.prev_plan || "free", p.prev_until, p.prev_start, u.id);
+  })();
+  notify(u.id, "Payment couldn't be verified", `We couldn't find UPI ref ${p.payment_id} for ₹${(p.amount / 100).toFixed(2)}. ${reason} Reply on WhatsApp +${SUPPORT.whatsapp} with a screenshot and we'll fix it.`, "warn");
   return true;
 }
 
@@ -218,8 +271,10 @@ const bearer = (req: Request) => {
   if (h.toLowerCase().startsWith("bearer ")) return h.slice(7).trim();
   return String(req.query.token || "");
 };
-const PUBLIC = [/^\/api\/health$/, /^\/api\/meta$/, /^\/api\/auth\//, /^\/api\/me$/, /^\/api\/billing\/plans$/, /^\/api\/billing\/webhook$/, /^\/api\/media\//, /^\/api\/public\//, /^\/api\/plugins\/callback$/];
+const PUBLIC = [/^\/api\/health$/, /^\/api\/meta$/, /^\/api\/auth\//, /^\/api\/me$/, /^\/api\/billing\/plans$/, /^\/api\/media\//, /^\/api\/public\//, /^\/api\/plugins\/callback$/];
 
+/** Real client IP; behind Cloudflare the Worker forwards CF-Connecting-IP (only trusted when LOOI_TRUST_CF=1). */
+const clientIp = (req: Request) => (process.env.LOOI_TRUST_CF === "1" && req.header("cf-connecting-ip")) || req.ip || "";
 const hits = new Map<string, { n: number; t: number }>();
 function rateLimited(key: string, max: number, windowMs: number) {
   const now = Date.now();
@@ -266,17 +321,17 @@ export function installAuth(app: Express) {
   });
 
   app.get("/api/billing/plans", (_req, res) =>
-    res.json({ saas: SAAS, trialDays: TRIAL_DAYS, payments: paymentsEnabled(), plans: [PLANS.free, PLANS.pro, PLANS.scale] }),
+    res.json({ saas: SAAS, trialDays: TRIAL_DAYS, payments: paymentsEnabled(), upi: { vpa: UPI_ID, payee: UPI_NAME }, support: SUPPORT, plans: [PLANS.free, PLANS.pro, PLANS.scale] }),
   );
 
   app.get("/api/me", (req, res) => {
     const u = (req as any).user as UserRow | undefined;
-    res.json({ saas: SAAS, user: u ? publicUser(getUser(u.id)!) : null, payments: paymentsEnabled(), razorpayKeyId: paymentsEnabled() ? RZP_ID : "", trialDays: TRIAL_DAYS, plans: [PLANS.free, PLANS.pro, PLANS.scale] });
+    res.json({ saas: SAAS, user: u ? publicUser(getUser(u.id)!) : null, payments: paymentsEnabled(), upi: { vpa: UPI_ID, payee: UPI_NAME }, support: SUPPORT, trialDays: TRIAL_DAYS, plans: [PLANS.free, PLANS.pro, PLANS.scale] });
   });
 
   app.post("/api/auth/signup", (req, res) => {
     if (!SAAS) return res.status(400).json({ message: "Accounts are disabled on this server." });
-    if (rateLimited("su:" + req.ip, 8, 3600_000)) return res.status(429).json({ message: "Too many sign-ups from this network. Try again later." });
+    if (rateLimited("su:" + clientIp(req), 8, 3600_000)) return res.status(429).json({ message: "Too many sign-ups from this network. Try again later." });
     const email = String(req.body?.email || "").trim().toLowerCase();
     const password = String(req.body?.password || "");
     const name = String(req.body?.name || "").trim().slice(0, 80);
@@ -292,7 +347,7 @@ export function installAuth(app: Express) {
   app.post("/api/auth/login", (req, res) => {
     if (!SAAS) return res.status(400).json({ message: "Accounts are disabled on this server." });
     const email = String(req.body?.email || "").trim().toLowerCase();
-    if (rateLimited("li:" + req.ip, 20, 900_000) || rateLimited("le:" + email, 10, 900_000)) return res.status(429).json({ message: "Too many attempts. Wait 15 minutes and try again." });
+    if (rateLimited("li:" + clientIp(req), 20, 900_000) || rateLimited("le:" + email, 10, 900_000)) return res.status(429).json({ message: "Too many attempts. Wait 15 minutes and try again." });
     const u = sqlite.prepare("SELECT * FROM users WHERE email = ?").get(email) as UserRow | undefined;
     if (!u || !checkPassword(String(req.body?.password || ""), u.pass)) return res.status(401).json({ message: "Wrong email or password." });
     res.json({ token: newSession(u.id, req.header("user-agent") || ""), user: publicUser(u) });
@@ -329,58 +384,52 @@ export function installAuth(app: Express) {
     res.json({ ok: true });
   });
 
-  // ---------- payments
-  app.post("/api/billing/order", async (req, res) => {
+  // ---------- payments: 1) create order → UPI deep link / QR with unique amount  2) user submits UTR  3) admin verifies
+  app.post("/api/billing/order", (req, res) => {
     const u = (req as any).user as UserRow | undefined;
     if (!u) return res.status(401).json({ message: "Please sign in to continue." });
     if (!paymentsEnabled()) return res.status(503).json({ message: "Payments aren't switched on yet. Please check back soon." });
+    if (rateLimited("ord:" + u.id, 12, 3600_000)) return res.status(429).json({ message: "Too many payment attempts. Try again in a while." });
     const plan = req.body?.plan === "scale" ? "scale" : "pro";
-    const amount = PLANS[plan].priceInr * 100;
-    try {
-      const r = await fetch("https://api.razorpay.com/v1/orders", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: "Basic " + Buffer.from(`${RZP_ID}:${RZP_SECRET}`).toString("base64") },
-        body: JSON.stringify({ amount, currency: "INR", receipt: `looi_${u.id}_${Date.now()}`, notes: { userId: String(u.id), plan } }),
-        signal: AbortSignal.timeout(20_000),
-      });
-      const j: any = await r.json();
-      if (!r.ok) throw new Error(j?.error?.description || `Razorpay ${r.status}`);
-      sqlite.prepare("INSERT INTO payments (user_id,order_id,plan,amount,currency,status,created_at) VALUES (?,?,?,?,?,?,?)").run(u.id, j.id, plan, amount, "INR", "created", Date.now());
-      res.json({ orderId: j.id, amount, currency: "INR", keyId: RZP_ID, plan, name: PLANS[plan].label, email: u.email, userName: u.name });
-    } catch (e) {
-      res.status(502).json({ message: "Couldn't start the payment: " + String((e as Error).message).slice(0, 200) });
-    }
+    // reuse an open, unpaid order for the same plan so refreshing doesn't change the amount
+    const open = sqlite.prepare("SELECT * FROM payments WHERE user_id=? AND plan=? AND status='created' AND created_at > ? ORDER BY id DESC").get(u.id, plan, Date.now() - ORDER_TTL) as PayRow | undefined;
+    if (open) return res.json(publicPayment(open));
+    const amount = uniqueAmount(PLANS[plan].priceInr);
+    const info = sqlite.prepare("INSERT INTO payments (user_id,order_id,plan,amount,currency,status,created_at) VALUES (?,?,?,?,?,?,?)").run(u.id, newRef(), plan, amount, "INR", "created", Date.now());
+    res.json(publicPayment(sqlite.prepare("SELECT * FROM payments WHERE id=?").get(Number(info.lastInsertRowid)) as PayRow));
   });
 
-  app.post("/api/billing/verify", (req, res) => {
+  app.post("/api/billing/utr", (req, res) => {
     const u = (req as any).user as UserRow | undefined;
     if (!u) return res.status(401).json({ message: "Please sign in to continue." });
-    const { razorpay_order_id: o, razorpay_payment_id: p, razorpay_signature: s } = req.body || {};
-    if (!o || !p || !s) return res.status(400).json({ message: "Missing payment details." });
-    const want = crypto.createHmac("sha256", RZP_SECRET).update(`${o}|${p}`).digest("hex");
-    if (want.length !== String(s).length || !crypto.timingSafeEqual(Buffer.from(want), Buffer.from(String(s)))) return res.status(400).json({ message: "Payment signature didn't match." });
-    const row = sqlite.prepare("SELECT * FROM payments WHERE order_id = ? AND user_id = ?").get(o, u.id) as any;
-    if (!row) return res.status(404).json({ message: "Order not found." });
-    activate(u.id, row.plan, o, p);
-    res.json({ ok: true, user: publicUser(getUser(u.id)!) });
+    if (rateLimited("utr:" + u.id, 10, 3600_000)) return res.status(429).json({ message: "Too many attempts. Try again in an hour or message us on WhatsApp." });
+    const utr = String(req.body?.utr || "").replace(/\s+/g, "");
+    if (!/^\d{12}$/.test(utr)) return res.status(400).json({ message: "UTR / UPI Ref No. is the 12-digit number in your UPI app's payment details." });
+    const p = sqlite.prepare("SELECT * FROM payments WHERE order_id=? AND user_id=?").get(String(req.body?.orderId || ""), u.id) as PayRow | undefined;
+    if (!p) return res.status(404).json({ message: "Order not found. Start the payment again." });
+    if (p.status !== "created") return res.status(409).json({ message: p.status === "paid" ? "This payment is already verified." : "A UTR was already submitted for this order." });
+    if (Date.now() - p.created_at > ORDER_TTL) return res.status(410).json({ message: "This payment request expired. Start a new one; if you already paid, message us on WhatsApp." });
+    const dup = sqlite.prepare("SELECT id FROM payments WHERE payment_id=? AND id != ?").get(utr, p.id);
+    if (dup) return res.status(409).json({ message: "This UTR was already used for another payment." });
+    const now = Date.now();
+    // provisional access while we verify — not for accounts with a previously rejected UTR
+    const flagged = !!sqlite.prepare("SELECT id FROM payments WHERE user_id=? AND status='rejected'").get(u.id);
+    const give = PROVISIONAL_MS > 0 && !flagged;
+    sqlite.transaction(() => {
+      sqlite.prepare("UPDATE payments SET status='submitted', payment_id=?, utr_at=?, prev_plan=?, prev_until=?, prev_start=?, provisional=? WHERE id=?").run(utr, now, u.plan, u.plan_until, u.plan_start, give ? 1 : 0, p.id);
+      if (give) {
+        const same = u.plan === p.plan && u.plan_until > now;
+        sqlite.prepare("UPDATE users SET plan=?, plan_until=?, plan_start=?, limit_notice=0 WHERE id=?").run(p.plan, same ? u.plan_until : now + PROVISIONAL_MS, same ? u.plan_start : now, u.id);
+      }
+    })();
+    notifyAdmins("Verify UPI payment", `${u.email} · ${PLANS[p.plan].label} · ₹${(p.amount / 100).toFixed(2)} · UTR ${utr} · ${p.order_id}`);
+    res.json({ ok: true, provisional: give, payment: publicPayment(sqlite.prepare("SELECT * FROM payments WHERE id=?").get(p.id) as PayRow), user: publicUser(getUser(u.id)!) });
   });
 
-  // Razorpay webhook: payment.captured / order.paid (safety net if the app closes mid-checkout)
-  app.post("/api/billing/webhook", (req, res) => {
-    if (!RZP_WEBHOOK) return res.sendStatus(204);
-    const sig = req.header("x-razorpay-signature") || "";
-    const raw = (req as any).rawBody as Buffer | undefined;
-    if (!raw) return res.sendStatus(400);
-    const want = crypto.createHmac("sha256", RZP_WEBHOOK).update(raw).digest("hex");
-    if (want.length !== sig.length || !crypto.timingSafeEqual(Buffer.from(want), Buffer.from(sig))) return res.sendStatus(400);
-    const ev = req.body || {};
-    const pay = ev.payload?.payment?.entity;
-    const orderId = pay?.order_id || ev.payload?.order?.entity?.id;
-    if ((ev.event === "payment.captured" || ev.event === "order.paid") && orderId) {
-      const row = sqlite.prepare("SELECT * FROM payments WHERE order_id = ?").get(orderId) as any;
-      if (row) activate(row.user_id, row.plan, orderId, pay?.id || "");
-    }
-    res.json({ ok: true });
+  app.get("/api/billing/history", (req, res) => {
+    const u = (req as any).user as UserRow | undefined;
+    if (!u) return res.status(401).json({ message: "Please sign in to continue." });
+    res.json((sqlite.prepare("SELECT * FROM payments WHERE user_id=? AND status != 'created' ORDER BY id DESC LIMIT 50").all(u.id) as PayRow[]).map(publicPayment));
   });
 
   // ---------- admin
@@ -393,7 +442,9 @@ export function installAuth(app: Express) {
       users: n("SELECT count(*) n FROM users"),
       newUsers7d: n("SELECT count(*) n FROM users WHERE created_at >= ?", now - 7 * DAY),
       active7d: n("SELECT count(*) n FROM users WHERE last_seen >= ?", now - 7 * DAY),
-      paying: n("SELECT count(*) n FROM users WHERE plan IN ('pro','scale') AND plan_until > ?", now),
+      paying: n("SELECT count(*) n FROM users u WHERE plan IN ('pro','scale') AND plan_until > ? AND EXISTS (SELECT 1 FROM payments p WHERE p.user_id=u.id AND p.status='paid')", now),
+      provisional: n("SELECT count(DISTINCT user_id) n FROM payments WHERE status='submitted' AND provisional=1"),
+      pendingPayments: n("SELECT count(*) n FROM payments WHERE status='submitted'"),
       revenue30dInr: Math.round(n("SELECT coalesce(sum(amount),0) n FROM payments WHERE status='paid' AND paid_at >= ?", now - PERIOD) / 100),
       revenueAllInr: Math.round(n("SELECT coalesce(sum(amount),0) n FROM payments WHERE status='paid'") / 100),
       missions: n("SELECT count(*) n FROM missions"),
@@ -401,6 +452,22 @@ export function installAuth(app: Express) {
       ads: n("SELECT count(*) n FROM creatives WHERE status != 'failed'"),
       posts: n("SELECT count(*) n FROM posts WHERE status='published'"),
     });
+  });
+  app.get("/api/admin/payments", (req, res) => {
+    const u = (req as any).user as UserRow | undefined;
+    if (!isAdmin(u)) return res.status(403).json({ message: "Admins only." });
+    const st = String(req.query.status || "submitted");
+    const rows = sqlite.prepare(`SELECT p.*, u.email FROM payments p JOIN users u ON u.id = p.user_id ${st === "all" ? "WHERE p.status != 'created'" : "WHERE p.status = ?"} ORDER BY p.id DESC LIMIT 200`).all(...(st === "all" ? [] : [st])) as (PayRow & { email: string })[];
+    res.json(rows.map((r) => ({ ...publicPayment(r), email: r.email })));
+  });
+  app.post("/api/admin/payments/:id/:action", (req, res) => {
+    const u = (req as any).user as UserRow | undefined;
+    if (!isAdmin(u)) return res.status(403).json({ message: "Admins only." });
+    const p = sqlite.prepare("SELECT * FROM payments WHERE id=?").get(Number(req.params.id)) as PayRow | undefined;
+    if (!p) return res.status(404).json({ message: "Payment not found." });
+    const ok = req.params.action === "approve" ? approve(p, u!.email) : req.params.action === "reject" ? reject(p, String(req.body?.reason || "No matching payment found.")) : false;
+    if (!ok) return res.status(409).json({ message: "Nothing to change for this payment." });
+    res.json(publicPayment(sqlite.prepare("SELECT * FROM payments WHERE id=?").get(p.id) as PayRow));
   });
   app.post("/api/admin/grant", (req, res) => {
     const u = (req as any).user as UserRow | undefined;

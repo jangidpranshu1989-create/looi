@@ -181,6 +181,12 @@ export const payments = sqliteTable("payments", {
   status: text("status").notNull().default("created"),
   createdAt: integer("created_at").notNull(),
   paidAt: integer("paid_at").notNull().default(0),
+  utrAt: integer("utr_at").notNull().default(0),
+  note: text("note").notNull().default(""),
+  prevPlan: text("prev_plan").notNull().default(""),
+  prevUntil: integer("prev_until").notNull().default(0),
+  prevStart: integer("prev_start").notNull().default(0),
+  provisional: integer("provisional").notNull().default(0),
 });
 
 export const insertMissionSchema = z.object({

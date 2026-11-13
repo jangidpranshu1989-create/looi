@@ -14,6 +14,7 @@ import Settings from "@/pages/settings";
 import DownloadPage from "@/pages/download";
 import AuthPage from "@/pages/auth";
 import Billing from "@/pages/billing";
+import AdminPage from "@/pages/admin";
 import { LegalPage } from "@/pages/legal";
 import { useMe } from "@/lib/auth";
 import { isDeviceMode } from "@/lib/queryClient";
@@ -45,6 +46,7 @@ const GApprovals = guard(Approvals);
 const GChannels = guard(Channels);
 const GSettings = guard(Settings);
 const GBilling = guard(Billing);
+const GAdmin = guard(AdminPage);
 
 function AppRouter() {
   const native = typeof window !== "undefined" && window.__LOOI__?.native;
@@ -60,6 +62,7 @@ function AppRouter() {
       <Route path="/app/channels" component={GChannels} />
       <Route path="/app/settings" component={GSettings} />
       <Route path="/app/billing" component={GBilling} />
+      <Route path="/app/admin" component={GAdmin} />
       <Route path="/download" component={DownloadPage} />
       <Route path="/privacy">{() => <LegalPage kind="privacy" />}</Route>
       <Route path="/terms">{() => <LegalPage kind="terms" />}</Route>

@@ -55,7 +55,7 @@ export function PricingCards({
               <span className="text-sm text-muted-foreground">/ month</span>
             </p>
             {p.key === "free" && <p className="mt-1 text-xs text-primary">Starts with a {trialDays}-day Pro trial</p>}
-            {p.key !== "free" && <p className="mt-1 text-xs text-muted-foreground">UPI, cards and netbanking via Razorpay</p>}
+            {p.key !== "free" && <p className="mt-1 text-xs text-muted-foreground">Pay by UPI · any app · no auto-debit</p>}
             <ul className="mt-6 flex-1 space-y-2.5 text-sm">
               {features(p).map((f) => (
                 <li key={f} className="flex items-start gap-2.5">

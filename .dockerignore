@@ -7,3 +7,7 @@ native/android
 native/ios
 native/www
 *.log
+cloudflare/node_modules
+cloudflare/.wrangler
+.github
+docs

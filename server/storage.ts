@@ -20,7 +20,12 @@ sqlite.pragma("busy_timeout = 5000");
   for (const f of fs.readdirSync(dir).filter((x) => x.endsWith(".sql")).sort()) {
     for (const stmt of fs.readFileSync(path.join(dir, f), "utf8").split("--> statement-breakpoint")) {
       const q = stmt.trim().replace(/^CREATE TABLE /i, "CREATE TABLE IF NOT EXISTS ").replace(/^CREATE (UNIQUE )?INDEX /i, (_m, u) => `CREATE ${u || ""}INDEX IF NOT EXISTS `);
-      if (q) sqlite.exec(q);
+      if (!q) continue;
+      try {
+        sqlite.exec(q);
+      } catch (e) {
+        if (!/already exists|duplicate column/i.test(String((e as Error).message))) throw e;
+      }
     }
   }
   for (const [t, c] of [["missions", "owner_id"], ["missions", "status"], ["creatives", "owner_id, created_at"], ["creatives", "mission_id"], ["events", "mission_id"], ["notifications", "owner_id"], ["posts", "mission_id"], ["channels", "owner_id"], ["approvals", "owner_id"], ["snapshots", "mission_id"], ["playbooks", "mission_id"], ["clicks", "link_code"]])

@@ -31,10 +31,10 @@ export default function DownloadPage() {
             <Smartphone className="size-5 text-primary" />
             <h2 className="mt-4 font-display text-lg font-bold">Android</h2>
             <p className="mt-2 text-sm text-muted-foreground">The whole agent runs on your phone: site audits, MP4 ads, Composio publishing and background re-checks with notifications. No server needed.</p>
-            <a href="./Looi.apk" download className="mt-4 block" data-testid="link-download-apk">
+            <a href="https://github.com/jangidpranshu1989-create/looi/releases/latest/download/Looi.apk" rel="noopener" className="mt-4 block" data-testid="link-download-apk">
               <Button className="w-full">Download APK</Button>
             </a>
-            <p className="mt-2 text-xs text-muted-foreground">Android 6.0+ · allow "install unknown apps" · enter your Looi server URL on first open.</p>
+            <p className="mt-2 text-xs text-muted-foreground">Android 6.0+ · allow "install unknown apps" · signs in to Looi Cloud automatically.</p>
             <div className="mt-3 rounded-lg bg-muted/50 p-3 font-mono text-[11px] leading-relaxed text-muted-foreground">
               cd native && npm i<br />npm run android:apk
             </div>

@@ -103,7 +103,13 @@ CREATE TABLE `payments` (
 	`currency` text DEFAULT 'INR' NOT NULL,
 	`status` text DEFAULT 'created' NOT NULL,
 	`created_at` integer NOT NULL,
-	`paid_at` integer DEFAULT 0 NOT NULL
+	`paid_at` integer DEFAULT 0 NOT NULL,
+	`utr_at` integer DEFAULT 0 NOT NULL,
+	`note` text DEFAULT '' NOT NULL,
+	`prev_plan` text DEFAULT '' NOT NULL,
+	`prev_until` integer DEFAULT 0 NOT NULL,
+	`prev_start` integer DEFAULT 0 NOT NULL,
+	`provisional` integer DEFAULT 0 NOT NULL
 );
 --> statement-breakpoint
 CREATE UNIQUE INDEX `payments_order_id_unique` ON `payments` (`order_id`);--> statement-breakpoint

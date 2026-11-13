@@ -1,0 +1,43 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "looi",
+  "main": "worker.ts",
+  "compatibility_date": "2026-11-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": { "enabled": true },
+  // Web app at the edge; API + media routes go to the Worker first
+  "assets": {
+    "directory": "../dist/public",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*", "/r/*"]
+  },
+  "containers": [
+    {
+      "class_name": "LooiServer",
+      "image": "../Dockerfile",
+      "image_build_context": "..",
+      // 1 vCPU / 6 GiB / 12 GB: Chromium + FFmpeg render real video ads. Use "standard-1" (½ vCPU, 4 GiB) to save ~40%.
+      "instance_type": "standard-2",
+      "max_instances": 1
+    }
+  ],
+  "durable_objects": { "bindings": [{ "name": "LOOI", "class_name": "LooiServer" }] },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["LooiServer"] }],
+  "r2_buckets": [{ "binding": "BUCKET", "bucket_name": "looi-data" }],
+  "triggers": { "crons": ["*/2 * * * *"] },
+  "vars": {
+    "LOOI_TRIAL_DAYS": "7",
+    "LOOI_PRICE_PRO_INR": "999",
+    "LOOI_PRICE_SCALE_INR": "2999",
+    "LOOI_WORKERS": "2",
+    "LOOI_AI_ORDER": "custom,nvidia,groq,openai",
+    "LOOI_NIM_TIMEOUT_MS": "45000",
+    "LOOI_UPI_ID": "8529418454@fam",
+    "LOOI_UPI_NAME": "Looi",
+    "LOOI_SUPPORT_EMAIL": "jangid.pranshu1989@gmail.com",
+    "LOOI_SUPPORT_WHATSAPP": "918529418454",
+    "LOOI_PROVISIONAL_HOURS": "48"
+  }
+  // Secrets (wrangler secret put / dashboard): NVIDIA_API_KEY, GROQ_API_KEY, COMPOSIO_API_KEY, PSI_API_KEY, ADMIN_EMAILS
+}

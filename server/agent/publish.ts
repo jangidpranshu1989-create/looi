@@ -1,6 +1,17 @@
 import fs from "node:fs";
 import type { Channel } from "@shared/schema";
 import { mediaPath } from "./analyze";
+import { ensureMedia } from "../persist";
+
+/** Poster as base64; pulls it back from R2 if this container restarted since render. */
+async function posterB64(file: string): Promise<string> {
+  try {
+    if (!fs.existsSync(mediaPath(file))) await ensureMedia(file);
+    return fs.readFileSync(mediaPath(file)).toString("base64");
+  } catch {
+    return "";
+  }
+}
 
 /** Manual-credential channels were replaced by Composio one-click plugins. Only the URL-based webhook remains. */
 export const CHANNEL_TYPES: Record<string, { label: string; fields: { key: string; label: string; secret?: boolean; placeholder?: string }[]; media: string; docs: string; note: string }> = {
@@ -43,7 +54,7 @@ export async function publishTo(ch: Channel, p: PublishInput): Promise<PublishRe
     const r = await fetch(c.url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ event: "looi.post", title: p.title, caption: p.caption, link: p.link, videoUrl: mediaUrl(p.videoFile), posterUrl: mediaUrl(p.posterFile), posterBase64: fs.readFileSync(mediaPath(p.posterFile)).toString("base64") }),
+      body: JSON.stringify({ event: "looi.post", title: p.title, caption: p.caption, link: p.link, videoUrl: mediaUrl(p.videoFile), posterUrl: mediaUrl(p.posterFile), posterBase64: await posterB64(p.posterFile) }),
     });
     if (!r.ok) throw new Error(`Webhook ${r.status}`);
     return { externalId: "", externalUrl: "" };

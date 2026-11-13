@@ -5,7 +5,7 @@ import { ArrowRight, Gauge, Clapperboard, Send, RefreshCcw, Cpu, Smartphone, Shi
 import { PricingCards } from "@/components/pricing";
 import { useMe } from "@/lib/auth";
 import { setPendingUrl } from "@/pages/auth";
-import { GITHUB_URL } from "@/lib/config";
+import { GITHUB_URL, SUPPORT_EMAIL, SUPPORT_PHONE_DISPLAY, waLink } from "@/lib/config";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -280,9 +280,11 @@ export default function Landing() {
         </div>
       </section>
       <footer className="border-t border-border">
-        <div className="mx-auto flex max-w-6xl items-center justify-between px-5 py-6 text-xs text-muted-foreground">
+        <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-4 px-5 py-6 text-xs text-muted-foreground">
           <Wordmark className="opacity-70" />
-          <div className="flex items-center gap-4">
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+            <a href={waLink()} target="_blank" rel="noreferrer" className="hover:text-foreground" data-testid="link-whatsapp">WhatsApp {SUPPORT_PHONE_DISPLAY}</a>
+            <a href={`mailto:${SUPPORT_EMAIL}`} className="hover:text-foreground" data-testid="link-email">{SUPPORT_EMAIL}</a>
             <Link href="/privacy" className="hover:text-foreground" data-testid="link-privacy">Privacy</Link>
             <Link href="/terms" className="hover:text-foreground" data-testid="link-terms">Terms</Link>
             <a href={GITHUB_URL} target="_blank" rel="noreferrer" className="hover:text-foreground">GitHub</a>

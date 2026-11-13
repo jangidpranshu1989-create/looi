@@ -18,3 +18,5 @@ native/ios
 *.jks
 *.keystore
 KEYSTORE-PASSWORD.txt
+cloudflare/node_modules
+cloudflare/.wrangler

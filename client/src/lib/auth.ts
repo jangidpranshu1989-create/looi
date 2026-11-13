@@ -34,7 +34,8 @@ export interface PlanInfo {
 export interface Me {
   saas: boolean;
   payments: boolean;
-  razorpayKeyId: string;
+  upi?: { vpa: string; payee: string };
+  support?: { email: string; whatsapp: string };
   trialDays: number;
   plans: PlanInfo[];
   user: null | {
@@ -56,3 +57,23 @@ export function useMe() {
 }
 export const daysLeft = (ts: number) => Math.max(0, Math.ceil((ts - Date.now()) / 86_400_000));
 export const inr = (n: number) => "₹" + n.toLocaleString("en-IN");
+
+export interface Payment {
+  id: number;
+  orderId: string;
+  plan: "pro" | "scale";
+  amount: number;
+  amountInr: string;
+  status: "created" | "submitted" | "paid" | "rejected";
+  utr: string;
+  createdAt: number;
+  utrAt: number;
+  paidAt: number;
+  note: string;
+  provisional: boolean;
+  expiresAt: number;
+  upiUrl: string;
+  vpa: string;
+  payee: string;
+  email?: string;
+}
