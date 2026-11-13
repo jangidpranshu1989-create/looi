@@ -3,7 +3,7 @@ import Anthropic from "@anthropic-ai/sdk";
 
 export const PROVIDERS: Record<string, { label: string; baseUrl: string; defaultModel: string; keyUrl: string }> = {
   groq: { label: "Groq", baseUrl: "https://api.groq.com/openai/v1", defaultModel: "openai/gpt-oss-120b", keyUrl: "https://console.groq.com/keys" },
-  nvidia: { label: "NVIDIA NIM", baseUrl: "https://integrate.api.nvidia.com/v1", defaultModel: "openai/gpt-oss-120b", keyUrl: "https://build.nvidia.com/settings" },
+  nvidia: { label: "NVIDIA NIM", baseUrl: "https://integrate.api.nvidia.com/v1", defaultModel: "meta/llama-3.3-70b-instruct", keyUrl: "https://build.nvidia.com/settings" },
   openai: { label: "OpenAI", baseUrl: "https://api.openai.com/v1", defaultModel: "gpt-4.1-mini", keyUrl: "https://platform.openai.com/api-keys" },
   custom: { label: "Custom (OpenAI-compatible)", baseUrl: "", defaultModel: "", keyUrl: "" },
 };

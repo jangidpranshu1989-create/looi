@@ -72,10 +72,10 @@ const ipOf = (req: Request) => req.headers.get("cf-connecting-ip") || "0";
 type Hop = { key: string; base: string; apiKey: string; models: string[]; timeout: number };
 const tripped = new Map<string, number>();
 // Preferred models, best first. Providers retire models often, so Looi checks /models and skips dead ones.
-const NIM_MODELS = ["deepseek-ai/deepseek-v4.1-flash", "moonshotai/kimi-k2.6", "nvidia/nemotron-3-super-120b-a12b", "mistralai/mistral-large-4-1t-a52b", "nvidia/llama-3.1-nemotron-ultra-253b-v1", "openai/gpt-oss-20b"];
+const NIM_MODELS = ["meta/llama-3.3-70b-instruct", "deepseek-ai/deepseek-v4.1-flash", "moonshotai/kimi-k2.6", "nvidia/nemotron-3-super-120b-a12b", "mistralai/mistral-large-4-1t-a52b", "nvidia/llama-3.1-nemotron-ultra-253b-v1", "openai/gpt-oss-20b"];
 const GROQ_MODELS = ["openai/gpt-oss-120b", "moonshotai/kimi-k2-instruct-0905", "llama-3.3-70b-versatile", "qwen/qwen3-32b", "openai/gpt-oss-20b", "llama-3.1-8b-instant"];
 function hops(env: Env): Hop[] {
-  const nimT = Number(env.LOOI_NIM_TIMEOUT_MS) || 45000;
+  const nimT = Number(env.LOOI_NIM_TIMEOUT_MS) || 15000;
   const pref = (m: string | undefined, list: string[]) => [...new Set([...(m ? m.split(",").map((s) => s.trim()) : []), ...list])].filter(Boolean);
   const all: (Hop | null)[] = [
     env.LOOI_AI_BASE_URL && env.LOOI_AI_KEY ? { key: "custom", base: env.LOOI_AI_BASE_URL.replace(/\/$/, ""), apiKey: env.LOOI_AI_KEY, models: pref(env.LOOI_AI_MODEL, []), timeout: 90000 } : null,
@@ -118,8 +118,15 @@ async function callHop(h: Hop, body: any, errors: string[]) {
     if (reasoning) payload.max_tokens = Math.max(payload.max_tokens, 1200);
     if (/gpt-oss/i.test(model) && !payload.reasoning_effort) payload.reasoning_effort = "low";
     const send = (p: any) => fetch(`${h.base}/chat/completions`, { method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${h.apiKey}` }, body: JSON.stringify(p), signal: AbortSignal.timeout(h.timeout) });
-    let r = await send(payload);
-    let text = await r.text();
+    let r: Response, text: string;
+    try {
+      r = await send(payload);
+      text = await r.text();
+    } catch (e: any) {
+      errors.push(`${h.key}/${model}: ${/abort|timeout/i.test(String(e?.message || e)) ? "timeout" : String(e?.message || e).slice(0, 80)}`);
+      if (h.key === "nvidia") break; // NIM slow -> switch to Groq right away
+      continue;
+    }
     if (!r.ok && r.status === 400 && (payload.response_format || payload.reasoning_effort) && !modelGone(r.status, text)) {
       delete payload.response_format;
       delete payload.reasoning_effort;
