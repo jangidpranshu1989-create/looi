@@ -14,7 +14,7 @@
   // id is filled in by the GitHub workflow (creates the namespace "looi-media" on first deploy)
   "kv_namespaces": [{ "binding": "MEDIA", "id": "__KV_ID__" }],
   "vars": {
-    "LOOI_NIM_TIMEOUT_MS": "45000",
+    "LOOI_NIM_TIMEOUT_MS": "15000",
     "LOOI_DAILY_AI": "300",
     "LOOI_DAILY_MEDIA": "40",
     "LOOI_UPI_ID": "8529418454@fam",

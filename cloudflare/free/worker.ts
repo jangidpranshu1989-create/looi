@@ -72,7 +72,7 @@ const ipOf = (req: Request) => req.headers.get("cf-connecting-ip") || "0";
 type Hop = { key: string; base: string; apiKey: string; models: string[]; timeout: number };
 const tripped = new Map<string, number>();
 // Preferred models, best first. Providers retire models often, so Looi checks /models and skips dead ones.
-const NIM_MODELS = ["meta/llama-3.3-70b-instruct", "deepseek-ai/deepseek-v4.1-flash", "moonshotai/kimi-k2.6", "nvidia/nemotron-3-super-120b-a12b", "mistralai/mistral-large-4-1t-a52b", "nvidia/llama-3.1-nemotron-ultra-253b-v1", "openai/gpt-oss-20b"];
+const NIM_MODELS = ["meta/llama-3.3-70b-instruct", "nvidia/nemotron-3-super-120b-a12b", "openai/gpt-oss-20b", "moonshotai/kimi-k2.6", "deepseek-ai/deepseek-v4.1-flash", "mistralai/mistral-large-4-1t-a52b", "nvidia/llama-3.1-nemotron-ultra-253b-v1", "openai/gpt-oss-20b"];
 const GROQ_MODELS = ["openai/gpt-oss-120b", "moonshotai/kimi-k2-instruct-0905", "llama-3.3-70b-versatile", "qwen/qwen3-32b", "openai/gpt-oss-20b", "llama-3.1-8b-instant"];
 function hops(env: Env): Hop[] {
   const nimT = Number(env.LOOI_NIM_TIMEOUT_MS) || 15000;
@@ -124,6 +124,7 @@ async function callHop(h: Hop, body: any, errors: string[]) {
       text = await r.text();
     } catch (e: any) {
       errors.push(`${h.key}/${model}: ${/abort|timeout/i.test(String(e?.message || e)) ? "timeout" : String(e?.message || e).slice(0, 80)}`);
+      deadModel.set(h.key + "|" + model, Date.now() + 30 * 60_000); // slow model: rest it, next call tries the next one
       if (h.key === "nvidia") break; // NIM slow -> switch to Groq right away
       continue;
     }
