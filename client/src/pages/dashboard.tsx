@@ -110,7 +110,8 @@ function Metric({ icon: I, v, l }: { icon: any; v: number; l: string }) {
 export function NewMission() {
   const [, nav] = useLocation();
   const { toast } = useToast();
-  const { data: channels = [] } = useQuery<any[]>({ queryKey: ["/api/channels"] });
+  const { data: allChannels = [] } = useQuery<any[]>({ queryKey: ["/api/channels"] });
+  const channels = allChannels.filter((c) => c.status === "connected");
   const { data: settings } = useQuery<any>({ queryKey: ["/api/settings"] });
   const [url, setUrl] = useState("");
   const [goal, setGoal] = useState("");
@@ -161,12 +162,12 @@ export function NewMission() {
             </div>
           </div>
           <div className="space-y-2">
-            <Label>Channels</Label>
+            <Label>Publish to</Label>
             {channels.length === 0 ? (
               <p className="rounded-lg border border-dashed border-border p-3 text-sm text-muted-foreground">
-                No channels connected. Ads will still be produced and downloadable.{" "}
+                No plugins connected. Ads will still be produced and downloadable.{" "}
                 <Link href="/app/channels" className="text-primary">
-                  Connect a channel
+                  Connect a plugin
                 </Link>
               </p>
             ) : (

@@ -31,10 +31,13 @@ export default function DownloadPage() {
             <Smartphone className="size-5 text-primary" />
             <h2 className="mt-4 font-display text-lg font-bold">Android</h2>
             <p className="mt-2 text-sm text-muted-foreground">Native Capacitor app with background polling and local notifications for approvals and cycle updates.</p>
-            <div className="mt-4 rounded-lg bg-muted/50 p-3 font-mono text-[11px] leading-relaxed text-muted-foreground">
+            <a href="./Looi.apk" download className="mt-4 block" data-testid="link-download-apk">
+              <Button className="w-full">Download APK</Button>
+            </a>
+            <p className="mt-2 text-xs text-muted-foreground">Android 6.0+ · allow "install unknown apps" · enter your Looi server URL on first open.</p>
+            <div className="mt-3 rounded-lg bg-muted/50 p-3 font-mono text-[11px] leading-relaxed text-muted-foreground">
               cd native && npm i<br />npm run android:apk
             </div>
-            <p className="mt-2 text-xs text-muted-foreground">Or push the repo to GitHub — the included workflow builds a signed-debug APK automatically.</p>
           </div>
           <div className="rounded-2xl border border-border bg-card p-6">
             <Smartphone className="size-5 text-primary" />

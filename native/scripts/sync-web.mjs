@@ -7,6 +7,8 @@ const out = path.resolve(root, "www");
 fs.rmSync(out, { recursive: true, force: true });
 fs.cpSync(src, out, { recursive: true });
 fs.copyFileSync(path.join(root, "setup/boot.js"), path.join(out, "boot.js"));
+// BackgroundRunner loads its script relative to webDir
+fs.cpSync(path.join(root, "runners"), path.join(out, "runners"), { recursive: true });
 let html = fs.readFileSync(path.join(out, "index.html"), "utf8");
 const m = html.match(/<script type="module"[^>]*src="([^"]+)"[^>]*><\/script>/);
 if (!m) throw new Error("bundle script not found");

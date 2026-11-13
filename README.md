@@ -8,7 +8,7 @@ Paste a URL. Looi audits the site for real, produces animated video ads from the
 |---|---|---|
 | Web app (React + Vite) | `client/` | Landing, dashboard, mission detail, approvals, channels, settings. Hash routing. |
 | API + agent (Express) | `server/` | Routes, SQLite storage, scheduler, job queue. |
-| Agent modules | `server/agent/` | `analyze.ts` (HTTP/DOM/SEO/security + Playwright render + Lighthouse), `render.ts` (frame-accurate MP4 ad renderer via Chromium + FFmpeg), `publish.ts` (channels + metrics), `llm.ts` (Groq / NVIDIA NIM / OpenAI / custom + built-in fallback), `agent.ts` (launch pipeline, re-check cycle, strategist, approvals, live state). |
+| Agent modules | `server/agent/` | `analyze.ts` (HTTP/DOM/SEO/security + Playwright render + Lighthouse), `render.ts` (frame-accurate MP4 ad renderer via Chromium + FFmpeg), `composio.ts` (one-click plugins via Composio), `publish.ts` (webhook + captions), `llm.ts` (Groq / NVIDIA NIM / OpenAI / custom + built-in fallback), `agent.ts` (launch pipeline, re-check cycle, strategist, approvals, live state). |
 | Native app (Capacitor 7) | `native/` | Android + iOS shell, server-URL setup, local notifications, OS background runner polling `/api/live`. |
 
 ## Run locally
@@ -55,6 +55,13 @@ Or push to GitHub: `.github/workflows/android.yml` builds a debug APK artifact.
 
 On first launch the app asks for your Looi server URL. Each device gets its own private workspace (`X-Looi-Device` header). Background checks run through `@capacitor/background-runner` (OS minimum ~15 min) and raise local notifications for approvals and cycle updates.
 
-## Channels
+## Plugins (one-click connect)
 
-Telegram bot, Discord webhook, Slack webhook, X (OAuth 1.0a user keys), LinkedIn (Posts API), Facebook Page video, Instagram Reels (needs public URL), and a generic webhook for Zapier / Make / n8n — which unlocks TikTok, YouTube Shorts, Pinterest and more.
+Publishing runs on [Composio](https://docs.composio.dev): users click **Connect**, sign in on the platform's own OAuth page, and Composio stores and refreshes the tokens. Looi never sees passwords or tokens.
+
+- Set `COMPOSIO_API_KEY` on the server (every user gets one-click connect with no setup), or paste a key in **Settings → Plugins**.
+- Curated marketing plugins: X, LinkedIn, Facebook Pages, Instagram, Reddit, Slack, Discord, Telegram, Gmail. Each has a tuned publish recipe (e.g. LinkedIn fetches your person URN first; Instagram creates a media container, then publishes).
+- **More apps:** search 1,000+ Composio toolkits. For uncurated apps the agent picks the publishing tool once and fills the arguments from the tool's JSON schema.
+- Arguments are filled by the configured LLM from each tool's live schema (`GET /api/v3.1/tools/{slug}`), executed through a session (`POST /api/v3.1/tool_router/session/{id}/execute`).
+- Image posts (Instagram, Facebook photo, Telegram photo) need **Public server URL** so the platform can fetch the poster.
+- An advanced webhook (Zapier / Make / n8n) remains for anything else.

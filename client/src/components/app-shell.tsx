@@ -12,7 +12,7 @@ import { useState } from "react";
 const NAV = [
   { href: "/app", label: "Missions", icon: LayoutGrid, match: (p: string) => p === "/app" || p.startsWith("/app/m/") },
   { href: "/app/approvals", label: "Approvals", icon: ShieldCheck, badge: true },
-  { href: "/app/channels", label: "Channels", icon: Plug },
+  { href: "/app/channels", label: "Plugins", icon: Plug },
   { href: "/app/settings", label: "Settings", icon: Settings2 },
 ];
 

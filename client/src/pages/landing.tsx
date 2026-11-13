@@ -52,7 +52,7 @@ export function UrlLauncher({ size = "lg", testId = "hero" }: { size?: "lg" | "m
 const STEPS = [
   { icon: Gauge, title: "Deep site audit", body: "Real Lighthouse runs on mobile and desktop, Core Web Vitals, security headers, SEO, broken links, tech stack and an AI UI/UX review of your actual screenshot." },
   { icon: Clapperboard, title: "Production ads", body: "Looi captures your real UI and brand colors, writes angles, and renders animated MP4 ads in square, story and landscape — plus posters for every one." },
-  { icon: Send, title: "Auto-publish", body: "Telegram, Discord, Slack, X, LinkedIn, Facebook, Instagram Reels or any Zapier/Make/n8n webhook. Every post carries a tracked link." },
+  { icon: Send, title: "Auto-publish", body: "One-click plugins for X, LinkedIn, Facebook, Instagram, Reddit, Slack, Discord, Telegram, Gmail and 1,000+ apps. No API keys to copy. Every post carries a tracked link." },
   { icon: RefreshCcw, title: "24/7 re-check", body: "Every 2–3 hours Looi re-measures your site, reads post metrics and clicks, and decides: scale, iterate, or pivot to a new route." },
 ];
 
@@ -144,7 +144,7 @@ export default function Landing() {
                 ["09:01", "X post #3: 2.1k views, 0.4% CTR — below baseline", "text-warn"],
                 ["09:01", "Decision: pivot → 'Pain killer' angle, story format", "text-primary"],
                 ["09:03", "Rendered 1080×1920 MP4 · 8.0s · 30fps", "text-muted-foreground"],
-                ["09:03", "Approval requested · Telegram, LinkedIn", "text-muted-foreground"],
+                ["09:03", "Approval requested · X, LinkedIn", "text-muted-foreground"],
                 ["11:30", "Next check scheduled", "text-muted-foreground"],
               ].map(([t, l, c], i) => (
                 <div key={i} className="flex gap-3 rounded-md bg-background/60 px-3 py-2">

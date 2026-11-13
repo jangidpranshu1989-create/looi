@@ -369,7 +369,8 @@ function CopyBox({ text }: { text: string }) {
 
 function PublishDialog({ creative, onClose }: { creative: any; onClose: () => void }) {
   const { toast } = useToast();
-  const { data: channels = [] } = useQuery<any[]>({ queryKey: ["/api/channels"] });
+  const { data: allChannels = [] } = useQuery<any[]>({ queryKey: ["/api/channels"] });
+  const channels = allChannels.filter((c) => c.status === "connected");
   const [sel, setSel] = useState<number[]>([]);
   const go = useMutation({
     mutationFn: () => apiRequest("POST", `/api/creatives/${creative.id}/publish`, { channelIds: sel }),
@@ -381,7 +382,7 @@ function PublishDialog({ creative, onClose }: { creative: any; onClose: () => vo
       <DialogContent>
         <DialogHeader><DialogTitle>Publish “{creative?.copy?.headline}”</DialogTitle></DialogHeader>
         {channels.length === 0 ? (
-          <p className="text-sm text-muted-foreground">No channels connected yet. <Link href="/app/channels" className="text-primary">Connect one</Link> — or download the MP4 and post it manually.</p>
+          <p className="text-sm text-muted-foreground">No plugins connected yet. <Link href="/app/channels" className="text-primary">Connect one</Link> — or download the MP4 and post it manually.</p>
         ) : (
           <div className="space-y-2">
             {channels.map((c) => (
@@ -412,7 +413,7 @@ function Publishing({ m }: { m: any }) {
         </div>
       )}
       {pending.length > 0 && <div className="rounded-xl border border-warn/30 bg-warn/5 p-4 text-sm"><p className="font-medium">{pending.length} batch waiting for your approval</p><Link href="/app/approvals" className="text-primary">Review approvals →</Link></div>}
-      {m.posts.length === 0 ? <Empty title="Nothing published yet" body={m.channelIds?.length ? "Posts appear here once ads are approved and published." : "Connect a channel to let Looi auto-publish."}><Link href="/app/channels"><Button variant="secondary" size="sm">Manage channels</Button></Link></Empty> : (
+      {m.posts.length === 0 ? <Empty title="Nothing published yet" body={m.channelIds?.length ? "Posts appear here once ads are approved and published." : "Connect a plugin to let Looi auto-publish."}><Link href="/app/channels"><Button variant="secondary" size="sm">Manage plugins</Button></Link></Empty> : (
         <div className="overflow-x-auto rounded-xl border border-border">
           <table className="w-full text-sm">
             <thead className="bg-card text-left text-xs text-muted-foreground"><tr>{["Channel", "Ad", "Status", "Published", "Clicks", "Metrics", ""].map((h) => <th key={h} className="px-4 py-2.5 font-medium">{h}</th>)}</tr></thead>

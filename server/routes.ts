@@ -8,6 +8,7 @@ import { normalizeUrl, mediaPath } from "./agent/analyze";
 import { PROVIDERS, testProvider, listModels, builtinAvailable } from "./agent/llm";
 import { CHANNEL_TYPES, verifyChannel } from "./agent/publish";
 import { FORMATS, TEMPLATES } from "./agent/render";
+import * as cx from "./agent/composio";
 import { enqueue, launchMission, checkMission, generateMore, publishCreatives, live, startScheduler, publicBase } from "./agent/agent";
 
 function owner(req: Request) {
@@ -23,12 +24,16 @@ const J = (s: string, d: any = {}) => {
   }
 };
 function maskSettings(s: any) {
-  const { apiKey, psiKey, ...rest } = s;
-  return { ...rest, hasApiKey: !!apiKey, apiKeyHint: apiKey ? "••••" + apiKey.slice(-4) : "", hasPsiKey: !!psiKey, builtinAvailable: builtinAvailable() };
+  const { apiKey, psiKey, composioKey, ...rest } = s;
+  return { ...rest, hasComposioKey: !!composioKey, composioKeyHint: composioKey ? "••••" + composioKey.slice(-4) : "", composioServer: !!process.env.COMPOSIO_API_KEY, hasApiKey: !!apiKey, apiKeyHint: apiKey ? "••••" + apiKey.slice(-4) : "", hasPsiKey: !!psiKey, builtinAvailable: builtinAvailable() };
 }
 function maskChannel(c: any) {
-  const def = CHANNEL_TYPES[c.type];
   const cfg = J(c.config);
+  if (c.type === "composio") {
+    const def = cx.pluginDef(cfg.toolkit);
+    return { ...c, config: { toolkit: cfg.toolkit, target: cfg.target || "", logo: cfg.logo || cx.logo(cfg.toolkit), tool: def ? (def.stepsWithImage || def.steps).join(" → ") : cfg.publishTool || "" } };
+  }
+  const def = CHANNEL_TYPES[c.type];
   const safe: Record<string, string> = {};
   for (const f of def?.fields || []) safe[f.key] = f.secret ? (cfg[f.key] ? "••••" + String(cfg[f.key]).slice(-4) : "") : cfg[f.key] || "";
   return { ...c, config: safe };
@@ -73,6 +78,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     const patch: any = { ...parsed.data };
     if (patch.apiKey === "") delete patch.apiKey; // keep existing unless explicitly cleared
     if (patch.psiKey === "") delete patch.psiKey;
+    if (patch.composioKey === "") delete patch.composioKey;
+    if (req.body.clearComposioKey) patch.composioKey = "";
     if (req.body.clearApiKey) patch.apiKey = "";
     if (patch.provider && patch.provider !== "custom" && PROVIDERS[patch.provider] && !req.body.baseUrl) patch.baseUrl = PROVIDERS[patch.provider].baseUrl;
     if (patch.intervalMinutes) patch.intervalMinutes = Math.min(Math.max(30, patch.intervalMinutes), 1440);
@@ -122,7 +129,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
     const o = owner(req);
     const st = storage.getSettings(o);
-    const channelIds = parsed.data.channelIds ?? storage.listChannels(o).map((c) => c.id);
+    const channelIds = parsed.data.channelIds ?? storage.listChannels(o).filter((c) => c.status === "connected").map((c) => c.id);
     const m = storage.createMission(o, { url, name: new URL(url).hostname.replace(/^www\./, ""), mode: parsed.data.mode || st.defaultMode, goal: parsed.data.goal || "", channelIds: JSON.stringify(channelIds), status: "queued", stage: "Queued" });
     storage.addEvent(o, m.id, "info", "Mission created", `Target: ${url}`);
     enqueue(m.id, "launch", () => launchMission(m.id));
@@ -242,6 +249,102 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     res.json({ ok: true });
   });
 
+  // ---------- plugins (Composio one-click connect)
+  const attachToMissions = (o: string, chId: number) => {
+    for (const m of storage.listMissions(o)) {
+      const ids: number[] = J(m.channelIds, []);
+      if (!ids.includes(chId)) storage.updateMission(m.id, { channelIds: JSON.stringify([...ids, chId]) });
+    }
+  };
+  const refreshPlugin = async (chId: number) => {
+    const ch = storage.getChannel(chId)!;
+    const st = storage.getSettings(ch.ownerId);
+    const key = cx.composioKey(st);
+    const cfg = J(ch.config);
+    const a = await cx.accountStatus(key, cfg.connectedAccountId);
+    if (a.status === "ACTIVE") {
+      if (!cx.pluginDef(cfg.toolkit) && !cfg.publishTool) {
+        try {
+          cfg.publishTool = await cx.pickPublishTool(st, key, cfg.toolkit);
+          storage.updateChannel(ch.id, { config: JSON.stringify(cfg) });
+        } catch (e) {
+          storage.updateChannel(ch.id, { status: "error", lastError: String((e as Error).message).slice(0, 300) });
+          return storage.getChannel(ch.id)!;
+        }
+      }
+      const was = ch.status;
+      storage.updateChannel(ch.id, { status: "connected", lastError: "" });
+      if (was !== "connected") {
+        attachToMissions(ch.ownerId, ch.id);
+        storage.notify(ch.ownerId, { title: `${ch.name} connected`, body: "Looi will publish your next approved ads here.", kind: "success" });
+      }
+    } else if (/FAILED|EXPIRED|INACTIVE/.test(a.status)) {
+      storage.updateChannel(ch.id, { status: "error", lastError: `${a.status}${a.reason ? ": " + a.reason : ""}. Reconnect to fix.` });
+    }
+    return storage.getChannel(ch.id)!;
+  };
+
+  app.get("/api/plugins", (req, res) => {
+    const st = storage.getSettings(owner(req));
+    res.json({ configured: !!cx.composioKey(st), source: st.composioKey ? "user" : process.env.COMPOSIO_API_KEY ? "server" : null, catalog: cx.PLUGINS.map((p) => ({ slug: p.slug, name: p.name, category: p.category, blurb: p.blurb, target: p.target || null, needsPublicMedia: !!p.needsPublicMedia, logo: cx.logo(p.slug) })) });
+  });
+  app.post("/api/plugins/verify", async (req, res) => {
+    const key = String(req.body?.key || cx.composioKey(storage.getSettings(owner(req))));
+    try {
+      res.json(await cx.verifyKey(key));
+    } catch (e) {
+      res.status(400).json({ message: (e as Error).message });
+    }
+  });
+  app.get("/api/plugins/search", async (req, res) => {
+    try {
+      res.json(await cx.searchToolkits(cx.composioKey(storage.getSettings(owner(req))), String(req.query.q || "").slice(0, 60)));
+    } catch (e) {
+      res.status(400).json({ message: (e as Error).message });
+    }
+  });
+  app.post("/api/plugins/connect", async (req, res) => {
+    const o = owner(req);
+    const toolkit = String(req.body?.toolkit || "").toLowerCase().replace(/[^a-z0-9_-]/g, "");
+    if (!toolkit) return res.status(400).json({ message: "toolkit required" });
+    const def = cx.pluginDef(toolkit);
+    const target = String(req.body?.target || "").slice(0, 300);
+    if (def?.target?.required && !target) return res.status(400).json({ message: `${def.target.label} is required for ${def.name}` });
+    try {
+      const st = storage.getSettings(o);
+      const { redirectUrl, connectedAccountId } = await cx.createConnectLink(cx.composioKey(st), o, toolkit, String(req.body?.callbackUrl || ""));
+      const name = (def?.name || String(req.body?.name || toolkit)) + (target ? ` · ${target}` : "");
+      const ch = storage.createChannel(o, { type: "composio", name: name.slice(0, 80), config: JSON.stringify({ toolkit, connectedAccountId, target, logo: String(req.body?.logo || "") }) });
+      storage.updateChannel(ch.id, { status: "pending" });
+      res.status(201).json({ redirectUrl, channel: maskChannel(storage.getChannel(ch.id)) });
+    } catch (e) {
+      res.status(400).json({ message: (e as Error).message });
+    }
+  });
+  app.post("/api/plugins/:id/refresh", async (req, res) => {
+    const ch = storage.getChannel(Number(req.params.id));
+    if (!ch || ch.ownerId !== owner(req) || ch.type !== "composio") return res.status(404).json({ message: "Not found" });
+    try {
+      res.json(maskChannel(await refreshPlugin(ch.id)));
+    } catch (e) {
+      res.status(400).json({ message: (e as Error).message });
+    }
+  });
+  app.patch("/api/channels/:id", (req, res) => {
+    const ch = storage.getChannel(Number(req.params.id));
+    if (!ch || ch.ownerId !== owner(req)) return res.status(404).json({ message: "Not found" });
+    if (ch.type === "composio" && typeof req.body?.target === "string") {
+      const cfg = J(ch.config);
+      cfg.target = req.body.target.slice(0, 300);
+      const def = cx.pluginDef(cfg.toolkit);
+      storage.updateChannel(ch.id, { config: JSON.stringify(cfg), name: ((def?.name || cfg.toolkit) + (cfg.target ? ` · ${cfg.target}` : "")).slice(0, 80) });
+    }
+    res.json(maskChannel(storage.getChannel(ch.id)));
+  });
+  app.get("/api/plugins/callback", (_req, res) => {
+    res.type("html").send(`<!doctype html><meta name=viewport content="width=device-width,initial-scale=1"><title>Connected · Looi</title><body style="background:#0b0c0e;color:#e8e8e3;font:16px system-ui;display:grid;place-items:center;min-height:100vh;margin:0"><div style="text-align:center;max-width:320px"><div style="width:44px;height:44px;border-radius:50%;background:#c6ff3a;margin:0 auto 16px"></div><h1 style="font-size:20px;margin:0 0 8px">Account connected</h1><p style="color:#9a9a93;margin:0">You can close this tab and go back to Looi. It will pick up the connection automatically.</p></div><script>setTimeout(()=>{try{window.close()}catch(e){}},1500)</script>`);
+  });
+
   // ---------- channels
   app.get("/api/channels", (req, res) => res.json(storage.listChannels(owner(req)).map(maskChannel)));
   app.post("/api/channels", async (req, res) => {
@@ -267,6 +370,14 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   app.post("/api/channels/:id/test", async (req, res) => {
     const ch = storage.getChannel(Number(req.params.id));
     if (!ch || ch.ownerId !== owner(req)) return res.status(404).json({ message: "Not found" });
+    if (ch.type === "composio") {
+      try {
+        const c = await refreshPlugin(ch.id);
+        return c.status === "connected" ? res.json({ ok: true, who: c.name }) : res.status(400).json({ ok: false, message: c.lastError || "Not connected yet — finish sign-in in the opened tab." });
+      } catch (e) {
+        return res.status(400).json({ ok: false, message: (e as Error).message });
+      }
+    }
     try {
       const who = await verifyChannel(ch);
       storage.updateChannel(ch.id, { status: "connected", lastError: "" });
@@ -280,6 +391,10 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   app.delete("/api/channels/:id", (req, res) => {
     const ch = storage.getChannel(Number(req.params.id));
     if (!ch || ch.ownerId !== owner(req)) return res.status(404).json({ message: "Not found" });
+    if (ch.type === "composio") {
+      const cfg = J(ch.config);
+      if (cfg.connectedAccountId) void cx.deleteAccount(cx.composioKey(storage.getSettings(ch.ownerId)), cfg.connectedAccountId);
+    }
     storage.deleteChannel(ch.id);
     res.json({ ok: true });
   });

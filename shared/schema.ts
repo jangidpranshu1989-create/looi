@@ -17,6 +17,7 @@ export const settings = sqliteTable("settings", {
   psiKey: text("psi_key").notNull().default(""),
   brandVoice: text("brand_voice").notNull().default(""),
   language: text("language").notNull().default("English"),
+  composioKey: text("composio_key").notNull().default(""),
 });
 
 export const missions = sqliteTable("missions", {
@@ -61,7 +62,7 @@ export const creatives = sqliteTable("creatives", {
 export const channels = sqliteTable("channels", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   ownerId: text("owner_id").notNull(),
-  type: text("type").notNull(), // telegram | discord | slack | x | linkedin | facebook | webhook
+  type: text("type").notNull(), // composio | webhook
   name: text("name").notNull(),
   config: text("config").notNull().default("{}"),
   status: text("status").notNull().default("unverified"), // unverified | connected | error

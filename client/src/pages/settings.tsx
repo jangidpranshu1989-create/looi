@@ -41,13 +41,14 @@ export default function Settings() {
   const [f, setF] = useState<any>(null);
   const [key, setKey] = useState("");
   const [psi, setPsi] = useState("");
+  const [cxKey, setCxKey] = useState("");
   const [models, setModels] = useState<string[]>([]);
   const [testRes, setTestRes] = useState<any>(null);
   useEffect(() => { if (s && !f) setF(s); }, [s]);
 
   const save = useMutation({
-    mutationFn: async (extra?: any) => (await apiRequest("PATCH", "/api/settings", { ...f, apiKey: key, psiKey: psi, ...extra })).json(),
-    onSuccess: (n) => { queryClient.setQueryData(["/api/settings"], n); setF(n); setKey(""); setPsi(""); toast({ title: "Settings saved" }); },
+    mutationFn: async (extra?: any) => (await apiRequest("PATCH", "/api/settings", { ...f, apiKey: key, psiKey: psi, composioKey: cxKey, ...extra })).json(),
+    onSuccess: (n) => { queryClient.setQueryData(["/api/settings"], n); setF(n); setKey(""); setPsi(""); setCxKey(""); queryClient.invalidateQueries({ queryKey: ["/api/plugins"] }); toast({ title: "Settings saved" }); },
     onError: (e: Error) => toast({ title: "Couldn't save", description: e.message, variant: "destructive" }),
   });
   const test = useMutation({
@@ -153,7 +154,17 @@ export default function Settings() {
         </label>
       </Section>
 
-      <Section title="Tracking & data" desc="Public URL enables tracked links (looi.link/r/…) and lets Instagram fetch your video.">
+      <Section title="Plugins" desc="One-click OAuth for X, LinkedIn, Facebook, Instagram, Reddit, Slack, Discord, Telegram, Gmail and 1,000+ more apps through Composio.">
+        <div className="space-y-1.5">
+          <Label htmlFor="cx">Composio API key</Label>
+          <Input id="cx" type="password" value={cxKey} onChange={(e) => setCxKey(e.target.value)} placeholder={s.hasComposioKey ? `Saved ${s.composioKeyHint} — type to replace` : s.composioServer ? "Provided by this server — optional override" : "Paste your project API key"} autoComplete="off" data-testid="input-composio-key-settings" />
+          <p className="text-xs text-muted-foreground">
+            Get one at <a href="https://platform.composio.dev" target="_blank" rel="noopener noreferrer" className="text-primary">platform.composio.dev</a> → Settings → API Keys. Connected accounts are stored by Composio, encrypted. Looi never receives your tokens.
+          </p>
+          {s.hasComposioKey && <Button variant="ghost" size="sm" className="px-0 text-bad" onClick={() => save.mutate({ clearComposioKey: true, composioKey: "" })} data-testid="button-clear-composio">Remove key</Button>}
+        </div>
+      </Section>
+      <Section title="Tracking & data" desc="Public URL enables tracked links (looi.link/r/…) and lets platforms like Instagram fetch your poster.">
         <div className="space-y-1.5">
           <Label htmlFor="pub">Public server URL</Label>
           <Input id="pub" value={f.publicBaseUrl} onChange={(e) => set("publicBaseUrl", e.target.value)} placeholder="https://looi.yourdomain.com" className="font-mono text-sm" data-testid="input-public-url" />

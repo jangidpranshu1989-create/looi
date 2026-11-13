@@ -8,6 +8,7 @@ import { fetchSite, renderSite, runLighthouse, readMediaB64, mediaPath, type Sit
 import { buildAdHtml, renderAd, deriveBrand, type AdCopy, type Brand, type FormatKey, type TemplateKey, TEMPLATES } from "./render";
 import { chatJson, builtinAvailable } from "./llm";
 import { publishTo, captionFor, fetchMetrics } from "./publish";
+import { publishComposio } from "./composio";
 import { exclusive } from "./browser";
 
 // ---------- live state (for the running pill)
@@ -196,12 +197,19 @@ export async function publishCreatives(missionId: number, creativeIds: number[],
     const copy = J(cr.copy);
     for (const chId of channelIds) {
       const ch = storage.getChannel(chId);
-      if (!ch || ch.ownerId !== m.ownerId) continue;
+      if (!ch || ch.ownerId !== m.ownerId || ch.status === "pending") continue;
       const code = crypto.randomBytes(5).toString("base64url");
-      const link = trackedLink(st, m, code, ch.type);
-      const post = storage.createPost({ ownerId: m.ownerId, missionId: m.id, creativeId: cr.id, channelId: ch.id, channelType: ch.type, linkCode: code, externalId: "", externalUrl: "", status: "queued", error: "", metrics: "{}", publishedAt: 0 });
+      const link = trackedLink(st, m, code, ch.type === "composio" ? J(ch.config).toolkit || "composio" : ch.type);
+      const post = storage.createPost({ ownerId: m.ownerId, missionId: m.id, creativeId: cr.id, channelId: ch.id, channelType: ch.type === "composio" ? J(ch.config).toolkit || "composio" : ch.type, linkCode: code, externalId: "", externalUrl: "", status: "queued", error: "", metrics: "{}", publishedAt: 0 });
       try {
-        const res = await publishTo(ch, { caption: captionFor(ch.type, copy.captions || {}, link, copy.hashtags || []), link, videoFile: cr.videoFile, posterFile: cr.posterFile, publicBase: publicBase(st), title: copy.headline || m.name });
+        const base = publicBase(st);
+        const tk = ch.type === "composio" ? J(ch.config).toolkit || "generic" : ch.type;
+        const capKey = tk === "twitter" ? "x" : tk === "discordbot" ? "discord" : tk;
+        const caption = captionFor(capKey, copy.captions || {}, link, copy.hashtags || []);
+        const res =
+          ch.type === "composio"
+            ? await publishComposio(st, ch, { caption, title: copy.headline || m.name, link, posterUrl: base && cr.posterFile ? `${base}/api/public/media/${cr.posterFile}` : "", videoUrl: base && cr.videoFile ? `${base}/api/public/media/${cr.videoFile}` : "" })
+            : await publishTo(ch, { caption, link, videoFile: cr.videoFile, posterFile: cr.posterFile, publicBase: base, title: copy.headline || m.name });
         storage.updatePost(post.id, { status: "published", externalId: res.externalId, externalUrl: res.externalUrl, publishedAt: Date.now() });
         storage.updateChannel(ch.id, { status: "connected", lastError: "" });
         storage.addEvent(m.ownerId, m.id, "success", `Published to ${ch.name}`, `“${copy.headline}” · ${cr.format}`);
@@ -223,18 +231,19 @@ function requestPublish(m: Mission, creatives: Creative[], reason: string) {
   const ok = creatives.filter((c) => c.status === "draft");
   if (!ok.length) return;
   const channelIds: number[] = J(m.channelIds, []);
-  const channels = channelIds.map((id) => storage.getChannel(id)).filter(Boolean);
+  const channels = channelIds.map((id) => storage.getChannel(id)).filter((c) => c && c.status !== "pending");
+  const readyIds = channels.map((c) => c!.id);
   if (!channels.length) {
     storage.notify(m.ownerId, { title: `${ok.length} new ad${ok.length > 1 ? "s" : ""} ready · ${m.name}`, body: "Connect a channel and attach it to this mission to auto-publish.", kind: "info", missionId: m.id });
     return;
   }
   if (m.mode === "autopilot") {
     storage.addEvent(m.ownerId, m.id, "decision", "Autopilot: publishing without approval", reason);
-    void enqueue(m.id, "publish", () => publishCreatives(m.id, ok.map((c) => c.id), channelIds));
+    void enqueue(m.id, "publish", () => publishCreatives(m.id, ok.map((c) => c.id), readyIds));
     return;
   }
   ok.forEach((c) => storage.updateCreative(c.id, { status: "pending" }));
-  const ap = storage.createApproval({ ownerId: m.ownerId, missionId: m.id, kind: "publish", title: `Publish ${ok.length} ad${ok.length > 1 ? "s" : ""} to ${channels.map((c) => c!.name).join(", ")}`, payload: JSON.stringify({ creativeIds: ok.map((c) => c.id), channelIds, reason, summary: reason, posters: ok.map((c) => c.posterFile).filter(Boolean) }) });
+  const ap = storage.createApproval({ ownerId: m.ownerId, missionId: m.id, kind: "publish", title: `Publish ${ok.length} ad${ok.length > 1 ? "s" : ""} to ${channels.map((c) => c!.name).join(", ")}`, payload: JSON.stringify({ creativeIds: ok.map((c) => c.id), channelIds: readyIds, reason, summary: reason, posters: ok.map((c) => c.posterFile).filter(Boolean) }) });
   storage.notify(m.ownerId, { title: "Approval needed", body: `${m.name}: ${ap.title}`, kind: "approval", missionId: m.id, approvalId: ap.id });
 }
 
@@ -417,7 +426,7 @@ export async function checkMission(missionId: number, manual = false) {
 
     setStage(job, "Strategist thinking", 50);
     const brief = J(m.brief);
-    const connected = storage.listChannels(m.ownerId).filter((c) => c.status !== "error").map((c) => c.type);
+    const connected = storage.listChannels(m.ownerId).filter((c) => c.status === "connected").map((c) => (c.type === "composio" ? J(c.config).toolkit : c.type));
     const usedPlaybooks = storage.listPlaybooks(m.id).map((p) => p.channel);
     const sys = `You are Looi's autonomous growth strategist. Mission: make this product a hit by any legitimate means. You run every few hours. Analyze real metrics, decide what to do next, and escalate to new routes when traction is weak (new angle → new format → new channel → community launches → SEO content → partnerships/influencers → conversion fixes on the site). Never repeat an angle that underperformed. Be concrete. Language: ${st.language}.`;
     const user = `PRODUCT: ${JSON.stringify(brief.product || {})}
