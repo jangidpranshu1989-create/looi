@@ -59,7 +59,7 @@ jobs:
           if [ -z "$CUR" ]; then
             for N in looiapp getlooi looi-ai looi-$(openssl rand -hex 3); do
               R=$(curl -s -X PUT -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -H "content-type: application/json" -d "{\"subdomain\":\"$N\"}" $API)
-              if echo "$R" | grep -q '"success":true'; then CUR=$N; break; fi
+              if echo "$R" | grep -qE '"success": *true'; then CUR=$N; break; fi
               echo "$N: $(echo "$R" | head -c 300)"
             done
           fi
