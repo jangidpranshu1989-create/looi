@@ -2,7 +2,7 @@ name: Deploy to Cloudflare (Free)
 
 # 100% free: Cloudflare Workers free plan + Workers KV. No card, no container.
 # Needs repo secrets CLOUDFLARE_API_TOKEN + CLOUDFLARE_ACCOUNT_ID.
-# Optional secrets: NVIDIA_API_KEY, GROQ_API_KEY (shared Looi AI), COMPOSIO_API_KEY (one-click plugins).
+# Optional secrets: NVIDIA_API_KEY, GROQ_API_KEY (shared Looi AI), COMPOSIO_API_KEY (one-click plugins), LOOI_ADMIN_TOKEN (opens /admin for UPI payments).
 on:
   workflow_dispatch:
   push:
@@ -59,11 +59,12 @@ jobs:
           NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
           COMPOSIO_API_KEY: ${{ secrets.COMPOSIO_API_KEY }}
+          LOOI_ADMIN_TOKEN: ${{ secrets.LOOI_ADMIN_TOKEN }}
           LOOI_AI_BASE_URL: ${{ secrets.LOOI_AI_BASE_URL }}
           LOOI_AI_KEY: ${{ secrets.LOOI_AI_KEY }}
           LOOI_AI_MODEL: ${{ secrets.LOOI_AI_MODEL }}
         run: |
-          node -e 'const k=["NVIDIA_API_KEY","GROQ_API_KEY","COMPOSIO_API_KEY","LOOI_AI_BASE_URL","LOOI_AI_KEY","LOOI_AI_MODEL"];const o={};for(const x of k)if(process.env[x])o[x]=process.env[x];require("fs").writeFileSync("/tmp/s.json",JSON.stringify(o))'
+          node -e 'const k=["NVIDIA_API_KEY","GROQ_API_KEY","COMPOSIO_API_KEY","LOOI_ADMIN_TOKEN","LOOI_AI_BASE_URL","LOOI_AI_KEY","LOOI_AI_MODEL"];const o={};for(const x of k)if(process.env[x])o[x]=process.env[x];require("fs").writeFileSync("/tmp/s.json",JSON.stringify(o))'
           OUT=$(npx wrangler deploy -c free/wrangler.jsonc --secrets-file /tmp/s.json 2>&1); echo "$OUT"; rm -f /tmp/s.json
           URL=$(echo "$OUT" | grep -oE 'https://[a-z0-9.-]+\.workers\.dev' | head -1)
           echo "url=$URL" >> $GITHUB_OUTPUT

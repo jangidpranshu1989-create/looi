@@ -8,6 +8,7 @@ import { apiRequest, queryClient } from "@/lib/queryClient";
 import { LivePill } from "./live-pill";
 import { Wordmark, useLive, timeAgo } from "./looi";
 import { cn } from "@/lib/utils";
+import { isFreeRelay } from "@/lib/relay";
 import { useState } from "react";
 
 const NAV = [
@@ -16,6 +17,7 @@ const NAV = [
   { href: "/app/channels", label: "Plugins", icon: Plug },
   { href: "/app/settings", label: "Settings", icon: Settings2 },
   { href: "/app/billing", label: "Billing", icon: CreditCard, saas: true },
+  { href: "/app/billing", label: "Upgrade", icon: Sparkles, free: true },
 ];
 
 /** Plan + usage card for Looi Cloud accounts. */
@@ -48,6 +50,19 @@ function PlanCard() {
           </>
         )}
       </div>
+    </Link>
+  );
+}
+
+/** Looi Free: small "Pro" chip in the header (mobile has no sidebar). */
+function FreeUpgradeButton() {
+  const { data: me } = useMe();
+  if (me?.saas || !isFreeRelay()) return null;
+  return (
+    <Link href="/app/billing">
+      <span className="ml-1 inline-flex h-8 items-center gap-1 rounded-full border border-primary/40 bg-primary/10 px-3 text-xs font-semibold text-primary hover-elevate md:hidden" data-testid="button-upgrade">
+        <Sparkles className="size-3.5" /> Pro
+      </span>
     </Link>
   );
 }
@@ -136,7 +151,7 @@ export function AppShell({ children, title, actions }: { children: React.ReactNo
           </Button>
         </Link>
         <nav className="mt-6 space-y-0.5">
-          {NAV.filter((n: any) => !n.saas || me?.saas).map((n) => {
+          {NAV.filter((n: any) => (n.free ? !me?.saas && isFreeRelay() : !n.saas || me?.saas)).map((n) => {
             const active = n.match ? n.match(path) : path === n.href;
             return (
               <Link key={n.href} href={n.href}>
@@ -175,6 +190,7 @@ export function AppShell({ children, title, actions }: { children: React.ReactNo
             {actions}
             <NotificationCenter />
             <AccountButton />
+            <FreeUpgradeButton />
           </div>
         </header>
         <main className="mx-auto w-full max-w-6xl flex-1 px-4 pb-28 pt-6 md:px-8 md:pb-12">{children}</main>

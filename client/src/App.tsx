@@ -14,6 +14,8 @@ import Settings from "@/pages/settings";
 import DownloadPage from "@/pages/download";
 import AuthPage from "@/pages/auth";
 import Billing from "@/pages/billing";
+import FreeBilling from "@/pages/free-billing";
+import { isFreeRelay } from "@/lib/relay";
 import AdminPage from "@/pages/admin";
 import { LegalPage } from "@/pages/legal";
 import { useMe } from "@/lib/auth";
@@ -45,7 +47,7 @@ const GMission = guard(MissionPage);
 const GApprovals = guard(Approvals);
 const GChannels = guard(Channels);
 const GSettings = guard(Settings);
-const GBilling = guard(Billing);
+const GBilling = guard((p: any) => (isFreeRelay() && !(window as any).__LOOI__?.server ? <FreeBilling {...p} /> : <Billing {...p} />));
 const GAdmin = guard(AdminPage);
 
 function AppRouter() {

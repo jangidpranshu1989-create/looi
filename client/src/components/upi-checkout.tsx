@@ -10,6 +10,21 @@ import { waLink } from "@/lib/config";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 
+/** Opens the UPI intent (GPay / PhonePe / Paytm / BHIM chooser) with payee, amount and note pre-filled. */
+export function openUpi(url: string) {
+  try {
+    const a = document.createElement("a");
+    a.href = url;
+    a.rel = "noopener";
+    a.style.display = "none";
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => a.remove(), 1000);
+  } catch {
+    window.location.href = url;
+  }
+}
+
 const isMobile = () => /android|iphone|ipad|ipod/i.test(navigator.userAgent) || !!(window as any).__LOOI__?.native;
 
 function CopyChip({ value, label, testid }: { value: string; label: string; testid: string }) {
@@ -31,7 +46,19 @@ function CopyChip({ value, label, testid }: { value: string; label: string; test
 }
 
 /** UPI checkout: exact-amount deep link / QR → user pastes the 12-digit UTR → we verify and switch the plan on. */
-export function UpiCheckout({ order, onClose }: { order: Payment | null; onClose: () => void }) {
+export function UpiCheckout({
+  order,
+  onClose,
+  submitUtr,
+  autoOpen,
+}: {
+  order: Payment | null;
+  onClose: () => void;
+  /** Custom UTR submit (Looi Free relay). Defaults to the Looi Cloud API. */
+  submitUtr?: (orderId: string, utr: string) => Promise<{ provisional: boolean; payment: Payment }>;
+  /** On phones, jump straight into the UPI app with everything pre-filled. */
+  autoOpen?: boolean;
+}) {
   const { toast } = useToast();
   const [qr, setQr] = useState("");
   const [utr, setUtr] = useState("");
@@ -43,6 +70,7 @@ export function UpiCheckout({ order, onClose }: { order: Payment | null; onClose
     setUtr("");
     setDone(null);
     if (order) QRCode.toDataURL(order.upiUrl, { margin: 1, width: 440, color: { dark: "#0b0b0d", light: "#ffffff" } }).then(setQr);
+    if (order && autoOpen && isMobile()) setTimeout(() => openUpi(order.upiUrl), 150);
   }, [order?.orderId]);
 
   if (!order) return null;
@@ -52,7 +80,7 @@ export function UpiCheckout({ order, onClose }: { order: Payment | null; onClose
   async function submit() {
     setBusy(true);
     try {
-      const r = await (await apiRequest("POST", "/api/billing/utr", { orderId: order!.orderId, utr })).json();
+      const r = submitUtr ? await submitUtr(order!.orderId, utr) : await (await apiRequest("POST", "/api/billing/utr", { orderId: order!.orderId, utr })).json();
       setDone({ provisional: r.provisional, payment: r.payment });
       queryClient.invalidateQueries({ queryKey: ["/api/me"] });
       queryClient.invalidateQueries({ queryKey: ["/api/billing/history"] });
@@ -101,8 +129,8 @@ export function UpiCheckout({ order, onClose }: { order: Payment | null; onClose
                 <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Step 1 · Pay</p>
                 {mobile && (
                   <Button className="mt-3 w-full" size="lg" asChild data-testid="button-open-upi">
-                    <a href={order.upiUrl}>
-                      <Smartphone className="size-4" /> Pay with any UPI app
+                    <a href={order.upiUrl} onClick={(e) => { e.preventDefault(); openUpi(order.upiUrl); }}>
+                      <Smartphone className="size-4" /> Pay ₹{order.amountInr} with any UPI app
                     </a>
                   </Button>
                 )}

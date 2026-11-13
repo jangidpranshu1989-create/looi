@@ -11,6 +11,8 @@
  *   /relay/fetch          CORS-free fetch so the browser version can audit any site
  *   /relay/status         which shared services are switched on
  */
+import { ADMIN_HTML } from "./admin-page";
+
 export interface Env {
   ASSETS: Fetcher;
   MEDIA: KVNamespace;
@@ -27,12 +29,18 @@ export interface Env {
   LOOI_DAILY_MEDIA?: string;
   NVIDIA_BASE_URL?: string;
   GROQ_BASE_URL?: string;
+  LOOI_UPI_ID?: string;
+  LOOI_UPI_NAME?: string;
+  LOOI_ADMIN_TOKEN?: string;
+  LOOI_PRO_INR?: string;
+  LOOI_SCALE_INR?: string;
+  LOOI_PROVISIONAL_HOURS?: string;
 }
 
 const CORS: Record<string, string> = {
   "access-control-allow-origin": "*",
   "access-control-allow-methods": "GET,POST,PUT,PATCH,DELETE,OPTIONS",
-  "access-control-allow-headers": "content-type,authorization,x-looi-device,x-api-key",
+  "access-control-allow-headers": "content-type,authorization,x-looi-device,x-api-key,x-looi-admin",
   "access-control-max-age": "86400",
 };
 const json = (d: unknown, status = 200, extra: Record<string, string> = {}) =>
@@ -80,7 +88,8 @@ async function aiChat(req: Request, env: Env) {
   const list = hops(env);
   if (!list.length) return err(503, "Looi AI is not switched on for this deployment. Add your own free Groq key in Settings → AI engine.");
   const dev = deviceOf(req) || ipOf(req);
-  if (overLimit("ai:" + dev, Number(env.LOOI_DAILY_AI) || 300)) return err(429, "Daily free Looi AI limit reached on this device. It resets at midnight UTC, or add your own free Groq key in Settings.");
+  const lim = await limitsFor(env, dev);
+  if (overLimit("ai:" + dev, lim.ai)) return err(429, lim.key === "free" ? "Daily free Looi AI limit reached on this device. Upgrade to Pro (UPI, 30 days) or add your own free Groq key in Settings. It resets at midnight UTC." : "Daily Looi AI limit for your plan reached. It resets at midnight UTC.");
   let body: any;
   try {
     body = await req.json();
@@ -155,7 +164,7 @@ async function composio(req: Request, env: Env, path: string) {
 const EXT: Record<string, string> = { "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp", "video/mp4": "mp4", "video/webm": "webm", "image/gif": "gif" };
 async function putMedia(req: Request, env: Env) {
   const dev = deviceOf(req) || ipOf(req);
-  if (overLimit("m:" + dev, Number(env.LOOI_DAILY_MEDIA) || 40)) return err(429, "Daily public-link limit reached on this device.");
+  if (overLimit("m:" + dev, (await limitsFor(env, dev)).media)) return err(429, "Daily public-link limit reached on this device. Upgrade to Pro for more.");
   const type = (req.headers.get("content-type") || "").split(";")[0].trim();
   const ext = EXT[type];
   if (!ext) return err(415, "Only JPG, PNG, WebP, GIF, MP4 or WebM");
@@ -215,19 +224,152 @@ async function proxyFetch(req: Request) {
   }
 }
 
+// ───────────────────────── Freemium: UPI deep link + UTR (stored in the same free KV) ─────────────────────────
+type PlanKey = "free" | "pro" | "scale";
+const DAY = 86_400_000;
+function plans(env: Env) {
+  return {
+    free: { key: "free", label: "Free", inr: 0, ai: Number(env.LOOI_DAILY_AI) || 300, media: Number(env.LOOI_DAILY_MEDIA) || 40 },
+    pro: { key: "pro", label: "Pro", inr: Number(env.LOOI_PRO_INR) || 999, ai: 3000, media: 300 },
+    scale: { key: "scale", label: "Scale", inr: Number(env.LOOI_SCALE_INR) || 2999, ai: 12000, media: 900 },
+  } as const;
+}
+interface DevicePlan { plan: PlanKey; until: number; status: "provisional" | "active"; orderId: string; prev?: DevicePlan | null }
+interface Order { orderId: string; device: string; plan: "pro" | "scale"; amount: number; status: "created" | "submitted" | "paid" | "rejected"; utr: string; createdAt: number; utrAt: number; paidAt: number; provisional: boolean; expiresAt: number; note: string }
+const planCache = new Map<string, { v: DevicePlan | null; at: number }>();
+async function devicePlan(env: Env, dev: string, fresh = false): Promise<DevicePlan | null> {
+  if (!dev) return null;
+  const c = planCache.get(dev);
+  if (!fresh && c && Date.now() - c.at < 5 * 60_000) return c.v;
+  let v = (await env.MEDIA.get("p:" + dev, "json")) as DevicePlan | null;
+  if (v && v.until < Date.now()) v = null;
+  planCache.set(dev, { v, at: Date.now() });
+  if (planCache.size > 20000) planCache.clear();
+  return v;
+}
+async function limitsFor(env: Env, dev: string) {
+  const P = plans(env);
+  const dp = await devicePlan(env, dev);
+  return P[dp?.plan || "free"];
+}
+const upiId = (env: Env) => env.LOOI_UPI_ID || "8529418454@fam";
+const upiName = (env: Env) => env.LOOI_UPI_NAME || "Looi";
+const inrStr = (paise: number) => (paise / 100).toFixed(2);
+const upiUrl = (env: Env, o: Order) =>
+  `upi://pay?pa=${upiId(env).replace(/[^a-zA-Z0-9.@_-]/g, "")}&pn=${encodeURIComponent(upiName(env))}&am=${inrStr(o.amount)}&cu=INR&tn=${encodeURIComponent("Looi " + o.plan + " " + o.orderId)}`;
+const pub = (env: Env, o: Order) => ({ ...o, amountInr: inrStr(o.amount), upiUrl: upiUrl(env, o), vpa: upiId(env), payee: upiName(env) });
+const rid = (n: number) => Array.from(crypto.getRandomValues(new Uint8Array(n)), (b) => "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"[b % 32]).join("");
+
+async function billing(req: Request, env: Env, sub: string) {
+  const dev = deviceOf(req);
+  const P = plans(env);
+  if (sub === "/plans" || sub === "/me") {
+    const dp = dev ? await devicePlan(env, dev, true) : null;
+    const last = dev ? ((await env.MEDIA.get("last:" + dev, "json")) as Order | null) : null;
+    return json({ vpa: upiId(env), payee: upiName(env), plans: Object.values(P), current: dp ? { ...dp, ...P[dp.plan] } : { plan: "free", ...P.free }, last: last ? pub(env, last) : null, provisionalHours: Number(env.LOOI_PROVISIONAL_HOURS) || 48 });
+  }
+  if (!dev) return err(400, "Missing device id. Update the app and try again.");
+  if (sub === "/order" && req.method === "POST") {
+    const b = (await req.json().catch(() => ({}))) as { plan?: string };
+    const plan = b.plan === "scale" ? "scale" : "pro";
+    if (overLimit("ord:" + dev, 20)) return err(429, "Too many payment attempts today. Please WhatsApp +91 85294 18454.");
+    let amount = 0;
+    for (let i = 0; i < 6; i++) {
+      const a = P[plan].inr * 100 + 1 + Math.floor(Math.random() * 98);
+      if (!(await env.MEDIA.get("a:" + a))) { amount = a; break; }
+    }
+    if (!amount) amount = P[plan].inr * 100 + 1 + Math.floor(Math.random() * 98);
+    const o: Order = { orderId: "LOOI" + rid(6), device: dev, plan, amount, status: "created", utr: "", createdAt: Date.now(), utrAt: 0, paidAt: 0, provisional: false, expiresAt: 0, note: "" };
+    await env.MEDIA.put("o:" + o.orderId, JSON.stringify(o), { expirationTtl: 90 * 86400 });
+    await env.MEDIA.put("a:" + amount, o.orderId, { expirationTtl: 2 * 86400 });
+    await env.MEDIA.put("last:" + dev, JSON.stringify(o), { expirationTtl: 90 * 86400 });
+    return json(pub(env, o));
+  }
+  if (sub === "/utr" && req.method === "POST") {
+    const b = (await req.json().catch(() => ({}))) as { orderId?: string; utr?: string };
+    const utr = String(b.utr || "").replace(/\D/g, "");
+    if (!/^\d{12}$/.test(utr)) return err(400, "UTR must be the 12-digit UPI reference number.");
+    const o = (await env.MEDIA.get("o:" + String(b.orderId || "").replace(/[^A-Z0-9]/g, ""), "json")) as Order | null;
+    if (!o || o.device !== dev) return err(404, "Order not found on this device.");
+    if (o.status === "paid") return json({ provisional: false, payment: pub(env, o) });
+    const dupe = await env.MEDIA.get("u:" + utr);
+    if (dupe && dupe !== o.orderId) return err(409, "This UTR was already used for another payment.");
+    const flagged = await env.MEDIA.get("r:" + dev);
+    const hours = Number(env.LOOI_PROVISIONAL_HOURS) || 48;
+    o.utr = utr; o.utrAt = Date.now(); o.status = "submitted"; o.provisional = !flagged; o.expiresAt = o.provisional ? Date.now() + hours * 3600_000 : 0;
+    await env.MEDIA.put("u:" + utr, o.orderId);
+    await env.MEDIA.put("o:" + o.orderId, JSON.stringify(o), { expirationTtl: 90 * 86400 });
+    await env.MEDIA.put("last:" + dev, JSON.stringify(o), { expirationTtl: 90 * 86400 });
+    if (o.provisional) {
+      const cur = await devicePlan(env, dev, true);
+      const prev = cur?.status === "active" ? { ...cur, prev: null } : cur?.prev || null;
+      await env.MEDIA.put("p:" + dev, JSON.stringify({ plan: o.plan, until: Math.max(o.expiresAt, prev?.until || 0), status: "provisional", orderId: o.orderId, prev } satisfies DevicePlan));
+      planCache.delete(dev);
+    }
+    return json({ provisional: o.provisional, payment: pub(env, o) });
+  }
+  return err(404, "Unknown billing route");
+}
+
+async function admin(req: Request, env: Env, sub: string) {
+  const tok = req.headers.get("x-looi-admin") || "";
+  if (!env.LOOI_ADMIN_TOKEN || tok.length < 16 || tok !== env.LOOI_ADMIN_TOKEN) return err(401, "Wrong admin key.");
+  if (sub === "/orders" && req.method === "GET") {
+    const out: any[] = [];
+    let cursor: string | undefined;
+    do {
+      const l = await env.MEDIA.list({ prefix: "o:", cursor, limit: 1000 });
+      const vals = await Promise.all(l.keys.map((k) => env.MEDIA.get(k.name, "json")));
+      for (const v of vals) if (v) out.push(pub(env, v as Order));
+      cursor = l.list_complete ? undefined : l.cursor;
+    } while (cursor && out.length < 3000);
+    out.sort((a, b) => (b.utrAt || b.createdAt) - (a.utrAt || a.createdAt));
+    const paid = out.filter((o) => o.status === "paid");
+    return json({ orders: out.filter((o) => o.status !== "created" || Date.now() - o.createdAt < 3 * DAY), stats: { paying: paid.length, revenueInr: paid.reduce((s, o) => s + o.amount, 0) / 100, pending: out.filter((o) => o.status === "submitted").length } });
+  }
+  const m = sub.match(/^\/orders\/([A-Z0-9]+)\/(approve|reject)$/);
+  if (m && req.method === "POST") {
+    const o = (await env.MEDIA.get("o:" + m[1], "json")) as Order | null;
+    if (!o) return err(404, "Order not found");
+    const cur = await devicePlan(env, o.device, true);
+    if (m[2] === "approve") {
+      const act = cur?.status === "active" ? cur : cur?.prev;
+      const base = act && act.until > Date.now() ? act.until : Date.now();
+      o.status = "paid"; o.paidAt = Date.now(); o.provisional = false;
+      await env.MEDIA.put("p:" + o.device, JSON.stringify({ plan: o.plan, until: base + 30 * DAY, status: "active", orderId: o.orderId } satisfies DevicePlan));
+    } else {
+      o.status = "rejected"; o.provisional = false; o.note = "Payment not found";
+      await env.MEDIA.put("r:" + o.device, "1", { expirationTtl: 180 * 86400 });
+      if (cur && cur.orderId === o.orderId && cur.status === "provisional") {
+        if (cur.prev && cur.prev.until > Date.now()) await env.MEDIA.put("p:" + o.device, JSON.stringify(cur.prev));
+        else await env.MEDIA.delete("p:" + o.device);
+      }
+      if (o.utr) await env.MEDIA.delete("u:" + o.utr);
+    }
+    await env.MEDIA.put("o:" + o.orderId, JSON.stringify(o), { expirationTtl: 90 * 86400 });
+    await env.MEDIA.put("last:" + o.device, JSON.stringify(o), { expirationTtl: 90 * 86400 });
+    planCache.delete(o.device);
+    return json(pub(env, o));
+  }
+  return err(404, "Unknown admin route");
+}
+
 export default {
   async fetch(req: Request, env: Env): Promise<Response> {
     const url = new URL(req.url);
     const p = url.pathname;
     if (req.method === "OPTIONS" && (p.startsWith("/relay/") || p.startsWith("/m/"))) return new Response(null, { status: 204, headers: CORS });
     try {
-      if (p === "/relay/status") return json({ ok: true, free: true, ai: hops(env).length > 0, composio: !!env.COMPOSIO_API_KEY, media: true, fetch: true });
+      if (p === "/relay/status") return json({ ok: true, free: true, ai: hops(env).length > 0, composio: !!env.COMPOSIO_API_KEY, media: true, fetch: true, payments: true, upi: upiId(env) });
       if (p === "/relay/ai/chat/completions" && req.method === "POST") return aiChat(req, env);
       if (p === "/relay/ai/models") return json({ data: [{ id: "looi", object: "model" }] });
       if (p.startsWith("/relay/composio/")) return composio(req, env, p.slice("/relay/composio".length));
       if (p === "/relay/media" && req.method === "POST") return putMedia(req, env);
       if (p.startsWith("/m/") && req.method === "GET") return getMedia(req, env, p.slice(3).replace(/[^a-zA-Z0-9.]/g, ""));
       if (p === "/relay/fetch") return proxyFetch(req);
+      if (p.startsWith("/relay/pay/")) return billing(req, env, p.slice("/relay/pay".length));
+      if (p.startsWith("/relay/admin/")) return admin(req, env, p.slice("/relay/admin".length));
+      if (p === "/admin" || p === "/admin/") return new Response(ADMIN_HTML, { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store", "x-frame-options": "DENY" } });
       if (p === "/api/health") return json({ ok: true, free: true, ts: Date.now() });
     } catch (e: any) {
       return err(500, String(e?.message || e));

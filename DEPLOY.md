@@ -33,6 +33,7 @@ https://github.com/jangidpranshu1989-create/looi/settings/secrets/actions → Ne
 | `NVIDIA_API_KEY` | free key at https://build.nvidia.com |
 | `GROQ_API_KEY` | free key at https://console.groq.com/keys |
 | `COMPOSIO_API_KEY` | free key at https://platform.composio.dev → Settings → API Keys |
+| `LOOI_ADMIN_TOKEN` | already set — opens /admin for payments |
 
 ## 3. Deploy
 
@@ -40,7 +41,17 @@ Actions → **Deploy to Cloudflare (Free)** → Run workflow (it also runs on ev
 
 Your app: `https://looi.<your-subdomain>.workers.dev` (printed in the run summary). Check `/relay/status` — every value should be `true`.
 
-## 4. Free-plan limits (be honest with users)
+## 4. Freemium: UPI one-tap payments
+
+Looi stays free. **Upgrade** (sidebar, or the Pro chip on phones) offers Pro ₹999 and Scale ₹2,999 for 30 days, which raise the daily Looi AI and public-link limits of that device.
+
+1. The user taps **Pay ₹999 by UPI**. On a phone, GPay / PhonePe / Paytm / BHIM opens straight away with UPI ID `8529418454@fam`, the exact amount (unique paise, e.g. ₹999.37) and the note `Looi pro LOOI…` filled in, so they only have to confirm. On a computer they scan the QR.
+2. They paste the 12-digit UTR. Duplicate UTRs are refused; the plan switches on for 48 h right away.
+3. You open `https://looi.<subdomain>.workers.dev/admin`, enter the admin key (GitHub secret `LOOI_ADMIN_TOKEN`), match the amount + UTR in your UPI history and press **Approve** (30 days) or **Reject** (plan off, that device loses instant unlock).
+
+Prices and limits: `LOOI_PRO_INR`, `LOOI_SCALE_INR` in `cloudflare/free/wrangler.jsonc`. Personal UPI IDs can't be verified by any API, so the admin check is the verification. Some UPI apps limit pre-filled amounts on personal IDs; a free merchant QR (Paytm / PhonePe Business) avoids that, then change `LOOI_UPI_ID`.
+
+## 5. Free-plan limits (be honest with users)
 
 | Limit | Value | What it means |
 |---|---|---|

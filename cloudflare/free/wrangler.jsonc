@@ -9,14 +9,19 @@
     "directory": "../../dist/public",
     "binding": "ASSETS",
     "not_found_handling": "single-page-application",
-    "run_worker_first": ["/relay/*", "/m/*", "/api/*"]
+    "run_worker_first": ["/relay/*", "/m/*", "/api/*", "/admin", "/admin/"]
   },
   // id is filled in by the GitHub workflow (creates the namespace "looi-media" on first deploy)
   "kv_namespaces": [{ "binding": "MEDIA", "id": "__KV_ID__" }],
   "vars": {
     "LOOI_NIM_TIMEOUT_MS": "45000",
     "LOOI_DAILY_AI": "300",
-    "LOOI_DAILY_MEDIA": "40"
+    "LOOI_DAILY_MEDIA": "40",
+    "LOOI_UPI_ID": "8529418454@fam",
+    "LOOI_UPI_NAME": "Looi",
+    "LOOI_PRO_INR": "999",
+    "LOOI_SCALE_INR": "2999",
+    "LOOI_PROVISIONAL_HOURS": "48"
   }
-  // Secrets (optional, shared with all users): NVIDIA_API_KEY, GROQ_API_KEY, COMPOSIO_API_KEY
+  // Secrets: NVIDIA_API_KEY, GROQ_API_KEY, COMPOSIO_API_KEY (shared with all users), LOOI_ADMIN_TOKEN (opens /admin)
 }

@@ -225,7 +225,7 @@ export default function Landing() {
             <div className="mx-auto max-w-3xl text-center">
               <p className="font-mono text-xs uppercase tracking-widest text-primary">Pricing</p>
               <h2 className="mt-3 font-display text-3xl font-extrabold md:text-4xl">Free. Actually free.</h2>
-              <p className="mt-3 text-muted-foreground">No card, no trial clock, no plans. The agent runs on your phone or in this tab, and the shared Looi relay handles the AI, publishing plugins and public ad links.</p>
+              <p className="mt-3 text-muted-foreground">No card, no sign-up, no trial clock. The agent runs on your phone or in this tab, and the shared Looi relay handles the AI, publishing plugins and public ad links. Need more each day? Pro is ₹999 for 30 days, paid in one tap by UPI.</p>
               <div className="mt-10 grid gap-3 text-left sm:grid-cols-3">
                 {[
                   ["Looi AI included", "NVIDIA NIM with instant Groq backup. Bring your own free key any time."],
@@ -240,6 +240,9 @@ export default function Landing() {
               </div>
               <Link href="/app">
                 <Button size="lg" className="mt-8" data-testid="button-free-open">Open Looi <ArrowRight className="size-4" /></Button>
+              </Link>
+              <Link href="/app/billing">
+                <Button size="lg" variant="ghost" className="ml-2 mt-8" data-testid="button-free-pro">See Pro</Button>
               </Link>
             </div>
           ) : (
