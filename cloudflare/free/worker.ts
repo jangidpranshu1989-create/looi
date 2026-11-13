@@ -170,11 +170,17 @@ async function aiChat(req: Request, env: Env) {
   delete body.stream;
   delete body.model;
   const errors: string[] = [];
-  for (const h of list) {
+  let order = list;
+  if (list.length > 1) {
+    const down = await env.MEDIA.get("aidown:" + list[0].key).catch(() => null);
+    if (down) order = [...list.slice(1), list[0]]; // primary known-down (shared across edge) -> go straight to backup
+  }
+  for (const h of order) {
     try {
       return json(await callHop(h, body, errors));
     } catch (e: any) {
       tripped.set(h.key, Date.now() + 3 * 60_000);
+      if (h === list[0] && list.length > 1) await env.MEDIA.put("aidown:" + h.key, "1", { expirationTtl: 600 }).catch(() => {});
       errors.push(String(e?.message || e).slice(0, 200));
       console.log("[looi-ai] switching:", errors[errors.length - 1]);
     }
