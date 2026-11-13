@@ -5,8 +5,26 @@ const BUILT_BASE = "__PORT_5000__".startsWith("__") ? "" : "__PORT_5000__";
 // Native shell (Capacitor) injects window.__LOOI__ = { server, device } before the app boots.
 declare global {
   interface Window {
-    __LOOI__?: { server?: string; device?: string; native?: boolean };
+    __LOOI__?: { server?: string; device?: string; native?: boolean; mode?: "device" | "server" };
   }
+}
+/** On-device mode: the agent runs inside this app (phone) — no server. */
+export function isDeviceMode() {
+  if (typeof window === "undefined") return false;
+  if (window.__LOOI__?.mode === "device") return true;
+  try {
+    return localStorage.getItem("looiMode") === "device";
+  } catch {
+    return false;
+  }
+}
+let local: typeof import("@/local/router") | null = null;
+let localMedia: typeof import("@/local/media") | null = null;
+export async function initDeviceMode() {
+  const [{ bootDevice }, r, m] = await Promise.all([import("@/local/bridge"), import("@/local/router"), import("@/local/media")]);
+  await bootDevice();
+  local = r;
+  localMedia = m;
 }
 export function apiBase() {
   const s = typeof window !== "undefined" ? window.__LOOI__?.server : "";
@@ -19,7 +37,11 @@ function headers(json: boolean): Record<string, string> {
   if (d) h["X-Looi-Device"] = d;
   return h;
 }
-export const mediaUrl = (file?: string, download = false) => (file ? `${apiBase()}/api/media/${file}${download ? "?download=1" : ""}` : "");
+export const mediaUrl = (file?: string, download = false) => {
+  if (!file) return "";
+  if (localMedia) return download ? `looi-media:${file}` : localMedia.getMediaUrl(file);
+  return `${apiBase()}/api/media/${file}${download ? "?download=1" : ""}`;
+};
 
 async function throwIfResNotOk(res: Response) {
   if (!res.ok) {
@@ -33,6 +55,11 @@ async function throwIfResNotOk(res: Response) {
 }
 
 export async function apiRequest(method: string, url: string, data?: unknown | undefined): Promise<Response> {
+  if (local) {
+    const r = await local.localFetch(method, url, data);
+    await throwIfResNotOk(r.clone());
+    return r;
+  }
   const res = await fetch(`${apiBase()}${url}`, {
     method,
     headers: headers(data !== undefined),
@@ -46,6 +73,11 @@ type UnauthorizedBehavior = "returnNull" | "throw";
 export const getQueryFn: <T>(options: { on401: UnauthorizedBehavior }) => QueryFunction<T> =
   ({ on401: unauthorizedBehavior }) =>
   async ({ queryKey }) => {
+    if (local) {
+      const r = await local.localFetch("GET", queryKey.join("/"));
+      await throwIfResNotOk(r.clone());
+      return await r.json();
+    }
     const res = await fetch(`${apiBase()}${queryKey.join("/")}`, { headers: headers(false) });
     if (unauthorizedBehavior === "returnNull" && res.status === 401) return null;
     await throwIfResNotOk(res);

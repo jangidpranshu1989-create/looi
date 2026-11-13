@@ -10,6 +10,7 @@ import { cn } from "@/lib/utils";
 export function notifyNative(title: string, body: string) {
   try {
     const anyWin = window as any;
+    if (anyWin.__LOOI__?.mode === "device") return; // the on-device agent raises its own notifications
     if (anyWin.__LOOI__?.native && anyWin.Capacitor?.Plugins?.LocalNotifications) {
       anyWin.Capacitor.Plugins.LocalNotifications.schedule({ notifications: [{ id: Math.floor(Math.random() * 1e6), title, body }] });
       return;

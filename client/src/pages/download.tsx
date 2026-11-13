@@ -30,7 +30,7 @@ export default function DownloadPage() {
           <div className="rounded-2xl border border-border bg-card p-6">
             <Smartphone className="size-5 text-primary" />
             <h2 className="mt-4 font-display text-lg font-bold">Android</h2>
-            <p className="mt-2 text-sm text-muted-foreground">Native Capacitor app with background polling and local notifications for approvals and cycle updates.</p>
+            <p className="mt-2 text-sm text-muted-foreground">The whole agent runs on your phone: site audits, MP4 ads, Composio publishing and background re-checks with notifications. No server needed.</p>
             <a href="./Looi.apk" download className="mt-4 block" data-testid="link-download-apk">
               <Button className="w-full">Download APK</Button>
             </a>

@@ -32,7 +32,9 @@ console.log("android patched");
 const bg = path.join(root, "android/app/build.gradle");
 let g = fs.readFileSync(bg, "utf8");
 const libDir = "'../../node_modules/@capacitor/background-runner/android/src/main/libs'";
-if (!g.includes("background-runner/android/src/main/libs")) {
+const aarDir = path.join(root, "node_modules/@capacitor/background-runner/android/src/main/libs");
+const hasAar = fs.existsSync(aarDir) && fs.readdirSync(aarDir).some((f) => f.endsWith(".aar"));
+if (hasAar && !g.includes("background-runner/android/src/main/libs")) {
   g = g.replace("dirs '../capacitor-cordova-android-plugins/src/main/libs', 'libs'", `dirs '../capacitor-cordova-android-plugins/src/main/libs', 'libs', ${libDir}`);
   fs.writeFileSync(bg, g);
 }

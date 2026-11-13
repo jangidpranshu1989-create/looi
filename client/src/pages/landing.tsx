@@ -75,11 +75,13 @@ export default function Landing() {
 
       <section className="relative overflow-hidden">
         <div className="grid-bg pointer-events-none absolute inset-0 [mask-image:radial-gradient(ellipse_at_top,black,transparent_70%)]" />
-        <div className="relative mx-auto max-w-6xl px-5 pb-20 pt-20 md:pt-28">
+        <div className="relative mx-auto max-w-6xl px-5 pb-20 pt-16 md:pt-24">
+          <div className="grid items-center gap-12 lg:grid-cols-[1.25fr_1fr]">
+          <div>
           <div className="inline-flex items-center gap-2 rounded-full border border-border bg-card px-3 py-1 text-xs text-muted-foreground">
             <span className="size-1.5 rounded-full bg-primary looi-pulse" /> Autonomous marketing agent · runs 24/7
           </div>
-          <h1 className="mt-6 max-w-3xl font-display text-[clamp(2.5rem,6vw,4.75rem)] font-extrabold leading-[0.98]">
+          <h1 className="mt-6 max-w-3xl font-display text-[clamp(2.5rem,5.4vw,4.5rem)] font-extrabold leading-[0.98] tracking-tight">
             Paste a URL.
             <br />
             <span className="text-primary">Looi markets it</span> until it hits.
@@ -90,6 +92,14 @@ export default function Landing() {
           <div className="mt-8">
             <UrlLauncher />
             <p className="mt-3 text-xs text-muted-foreground">Nothing is faked: every score is measured, every ad is rendered from your live site.</p>
+          </div>
+          <div className="mt-8 flex flex-wrap items-center gap-x-5 gap-y-2 text-xs text-muted-foreground">
+            <span className="inline-flex items-center gap-1.5"><Smartphone className="size-3.5 text-primary" /> Android app runs it on your phone — no server</span>
+            <span className="inline-flex items-center gap-1.5"><Cpu className="size-3.5 text-primary" /> Groq · NVIDIA NIM · any OpenAI API</span>
+            <span className="inline-flex items-center gap-1.5"><ShieldCheck className="size-3.5 text-primary" /> Bring your own keys — no lock-in</span>
+          </div>
+          </div>
+          <HeroPhone />
           </div>
 
           <div className="mt-16 grid gap-px overflow-hidden rounded-2xl border border-border bg-border md:grid-cols-4" id="how">
@@ -199,6 +209,70 @@ export default function Landing() {
           <span>Looi · autonomous marketing agent</span>
         </div>
       </footer>
+    </div>
+  );
+}
+
+/** Product mockup: the Looi mobile app mid-mission, with the live pill. */
+function HeroPhone() {
+  return (
+    <div className="relative mx-auto hidden w-[300px] lg:block" aria-hidden="true">
+      <div className="looi-float">
+        <div className="phone-frame relative overflow-hidden rounded-[44px] border-[6px] border-[#1b1b1f] bg-[#0b0b0d]">
+          <div className="flex h-[600px] flex-col px-4 pb-5 pt-3">
+            <div className="mx-auto flex h-8 w-[200px] items-center gap-2 rounded-full bg-black px-2 ring-1 ring-white/10">
+              <span className="grid size-5 place-items-center rounded-full bg-primary/15"><LooiMark className="size-3.5" spinning /></span>
+              <span className="truncate text-[11px] font-medium text-foreground">Producing ads · 3/4</span>
+              <span className="ml-auto font-mono text-[10px] text-primary">81%</span>
+            </div>
+            <div className="mt-5 flex items-center justify-between">
+              <Wordmark />
+              <span className="grid size-5 place-items-center rounded-full bg-primary text-[10px] font-bold text-primary-foreground">2</span>
+            </div>
+            <div className="mt-4 rounded-2xl border border-white/10 bg-white/[.03] p-3">
+              <p className="inline-flex items-center gap-1.5 text-[10px] font-medium text-primary"><span className="size-1.5 rounded-full bg-primary looi-pulse" /> On duty</p>
+              <p className="mt-1.5 font-display text-[15px] font-bold leading-snug">Marketing 2 products, around the clock.</p>
+              <p className="mt-1 text-[11px] text-muted-foreground">Next re-check in 2h 14m</p>
+            </div>
+            <div className="mt-3 grid grid-cols-3 gap-2">
+              {[["Health", "86", "text-ok"], ["Ads", "12", ""], ["Posts", "31", ""]].map(([l, v, c]) => (
+                <div key={l} className="rounded-xl border border-white/10 bg-white/[.03] px-2 py-2">
+                  <p className="text-[9px] text-muted-foreground">{l}</p>
+                  <p className={`font-mono text-sm font-semibold ${c}`}>{v}</p>
+                </div>
+              ))}
+            </div>
+            <div className="mt-3 overflow-hidden rounded-2xl border border-white/10">
+              <div className="relative aspect-[4/3] bg-[radial-gradient(120%_90%_at_0%_0%,#3b2f8a_0%,#14122b_55%,#0b0b0d_100%)] p-3">
+                <p className="text-[9px] font-semibold uppercase tracking-widest text-white/70">Stop guessing</p>
+                <p className="mt-1 font-display text-[17px] font-extrabold leading-tight text-white">Ship ads <span className="text-[#a9a2ff]">while</span> you sleep</p>
+                <span className="mt-2 inline-block rounded-full bg-[#7c6cf0] px-2.5 py-1 text-[9px] font-semibold text-white">Try it free →</span>
+                <div className="absolute -bottom-5 right-3 w-36 rotate-[-4deg] overflow-hidden rounded-lg bg-[#f4f4f6] shadow-2xl">
+                  <div className="flex gap-1 bg-[#e6e6ea] px-2 py-1"><span className="size-1 rounded-full bg-[#c2c2c8]" /><span className="size-1 rounded-full bg-[#c2c2c8]" /><span className="size-1 rounded-full bg-[#c2c2c8]" /></div>
+                  <div className="space-y-1 p-2"><div className="h-1.5 w-16 rounded bg-[#1b1b1f]" /><div className="h-1 w-24 rounded bg-[#c9c9cf]" /><div className="h-1 w-20 rounded bg-[#c9c9cf]" /><div className="mt-1.5 h-3 w-12 rounded bg-[#7c6cf0]" /></div>
+                </div>
+              </div>
+              <div className="flex items-center justify-between bg-white/[.03] px-3 py-2">
+                <span className="text-[10px] text-muted-foreground">1:1 · 8s · MP4</span>
+                <span className="rounded-full bg-primary px-2 py-0.5 text-[9px] font-bold text-primary-foreground">Approve</span>
+              </div>
+            </div>
+            <div className="mt-3 rounded-xl border border-white/10 bg-white/[.03] p-2.5">
+              <div className="flex items-center justify-between text-[10px]"><span className="text-muted-foreground">Strategist</span><span className="font-mono text-primary">PIVOT</span></div>
+              <div className="mt-1.5 h-1 overflow-hidden rounded-full bg-white/10"><div className="looi-bar h-full rounded-full bg-primary" /></div>
+              <p className="mt-1.5 text-[10px] leading-snug text-muted-foreground">Low traction on X. Trying a Reddit launch + 9:16 story ad.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div className="absolute -left-24 bottom-32 rounded-2xl border border-border bg-card/95 px-3 py-2 shadow-2xl backdrop-blur">
+        <p className="text-[10px] text-muted-foreground">Lighthouse · mobile</p>
+        <p className="font-mono text-sm font-semibold"><span className="text-ok">94</span> perf · <span className="text-ok">100</span> SEO</p>
+      </div>
+      <div className="absolute -right-20 top-[372px] rounded-2xl border border-border bg-card/95 px-3 py-2 shadow-2xl backdrop-blur">
+        <p className="text-[10px] text-muted-foreground">Published</p>
+        <p className="text-xs font-semibold">X · LinkedIn · Telegram</p>
+      </div>
     </div>
   );
 }

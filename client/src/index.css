@@ -210,3 +210,15 @@
 .looi-pulse { animation: looi-pulse 1.4s ease-in-out infinite; }
 .looi-shimmer { background: linear-gradient(90deg, transparent, hsl(var(--primary)/.18), transparent); background-size: 200% 100%; animation: looi-shimmer 1.8s linear infinite; }
 @media (prefers-reduced-motion: reduce) { .looi-orbit, .looi-pulse, .looi-shimmer { animation: none; } }
+
+/* Hero surfaces */
+.hero-glow::before {
+  content: ""; position: absolute; inset: -40% -10% auto auto; width: 520px; height: 520px; pointer-events: none;
+  background: radial-gradient(closest-side, hsl(var(--primary) / 0.14), transparent 70%);
+}
+.phone-frame { box-shadow: 0 0 0 1px hsl(0 0% 100% / .08), 0 40px 120px -20px hsl(var(--primary) / .18), 0 30px 60px -30px rgba(0,0,0,.9); }
+@keyframes looi-float { 0%,100% { transform: translateY(0) } 50% { transform: translateY(-8px) } }
+.looi-float { animation: looi-float 6s ease-in-out infinite; }
+@keyframes looi-bar { from { width: 18% } to { width: 86% } }
+.looi-bar { animation: looi-bar 5s cubic-bezier(.4,0,.2,1) infinite alternate; }
+@media (prefers-reduced-motion: reduce) { .looi-float, .looi-bar { animation: none; } }

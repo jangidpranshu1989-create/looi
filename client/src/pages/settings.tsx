@@ -77,8 +77,8 @@ export default function Settings() {
       <p className="mt-1 text-sm text-muted-foreground">Configure the agent's brain, rhythm and how it publishes.</p>
 
       <Section title="AI engine" desc="Looi uses this model for audits, copy and strategy. Any OpenAI-compatible endpoint works.">
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
-          {ENGINES.map((e) => (
+        <div className={cn("grid grid-cols-2 gap-2", s.device ? "sm:grid-cols-4" : "sm:grid-cols-5")}>
+          {ENGINES.filter((e) => !(s.device && e.id === "builtin")).map((e) => (
             <button key={e.id} onClick={() => { setF({ ...f, provider: e.id, baseUrl: meta?.providers?.[e.id]?.baseUrl || (e.id === "custom" ? f.baseUrl : ""), model: meta?.providers?.[e.id]?.defaultModel || "" }); setModels([]); setTestRes(null); }} className={cn("rounded-lg border p-3 text-left hover-elevate", f.provider === e.id ? "border-primary bg-primary/5" : "border-border")} data-testid={`button-engine-${e.id}`}>
               <p className="text-sm font-medium">{e.label}</p>
               <p className="text-[11px] text-muted-foreground">{e.d}</p>
@@ -109,10 +109,10 @@ export default function Settings() {
                 <Button variant="secondary" onClick={() => loadModels.mutate()} disabled={loadModels.isPending} data-testid="button-list-models">{loadModels.isPending ? <Loader2 className="size-4 animate-spin" /> : "Browse"}</Button>
               </div>
             </div>
-            <label className="flex items-center justify-between gap-3 text-sm">
+            {!s.device && <label className="flex items-center justify-between gap-3 text-sm">
               <span>Fall back to Looi built-in if my provider fails<span className="block text-xs text-muted-foreground">Keeps the 24/7 loop alive during rate limits or outages.</span></span>
               <Switch checked={f.builtinFallback} onCheckedChange={(v) => set("builtinFallback", v)} data-testid="switch-fallback" />
-            </label>
+            </label>}
           </div>
         )}
         <div className="flex flex-wrap items-center gap-3">
@@ -164,16 +164,29 @@ export default function Settings() {
           {s.hasComposioKey && <Button variant="ghost" size="sm" className="px-0 text-bad" onClick={() => save.mutate({ clearComposioKey: true, composioKey: "" })} data-testid="button-clear-composio">Remove key</Button>}
         </div>
       </Section>
-      <Section title="Tracking & data" desc="Public URL enables tracked links (looi.link/r/…) and lets platforms like Instagram fetch your poster.">
+      <Section title={s.device ? "Site audit" : "Tracking & data"} desc={s.device ? "Lighthouse runs through Google PageSpeed Insights. A free key avoids the shared daily quota." : "Public URL enables tracked links (looi.link/r/…) and lets platforms like Instagram fetch your poster."}>
+        {!s.device && (
+          <div className="space-y-1.5">
+            <Label htmlFor="pub">Public server URL</Label>
+            <Input id="pub" value={f.publicBaseUrl} onChange={(e) => set("publicBaseUrl", e.target.value)} placeholder="https://looi.yourdomain.com" className="font-mono text-sm" data-testid="input-public-url" />
+          </div>
+        )}
         <div className="space-y-1.5">
-          <Label htmlFor="pub">Public server URL</Label>
-          <Input id="pub" value={f.publicBaseUrl} onChange={(e) => set("publicBaseUrl", e.target.value)} placeholder="https://looi.yourdomain.com" className="font-mono text-sm" data-testid="input-public-url" />
-        </div>
-        <div className="space-y-1.5">
-          <Label htmlFor="psi">PageSpeed Insights API key (optional)</Label>
-          <Input id="psi" type="password" value={psi} onChange={(e) => setPsi(e.target.value)} placeholder={s.hasPsiKey ? "Saved — type to replace" : "Used only if local Lighthouse fails"} autoComplete="off" data-testid="input-psi-key" />
+          <Label htmlFor="psi" className="flex items-center justify-between">PageSpeed Insights API key {s.device ? "(recommended)" : "(optional)"} <a href="https://developers.google.com/speed/docs/insights/v5/get-started#APIKey" target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-xs font-normal text-primary">Get a free key <ExternalLink className="size-3" /></a></Label>
+          <Input id="psi" type="password" value={psi} onChange={(e) => setPsi(e.target.value)} placeholder={s.hasPsiKey ? "Saved — type to replace" : s.device ? "Paste your Google API key" : "Used only if local Lighthouse fails"} autoComplete="off" data-testid="input-psi-key" />
         </div>
       </Section>
+      {s.device && (
+        <Section title="Where Looi runs" desc="This app is the agent. Missions, ads and keys live on this device; Android wakes Looi in the background about every 15 minutes to run due checks.">
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-card p-4">
+            <div>
+              <p className="text-sm font-medium">On this phone · no server</p>
+              <p className="text-xs text-muted-foreground">Keep battery optimization off for Looi so the OS doesn't delay background runs.</p>
+            </div>
+            {(window as any).__LOOI_SWITCH__ && <Button variant="secondary" size="sm" onClick={() => (window as any).__LOOI_SWITCH__("server")} data-testid="button-switch-server">Use a Looi server instead</Button>}
+          </div>
+        </Section>
+      )}
       <div className="flex justify-end pt-6"><Button onClick={() => save.mutate(undefined)} disabled={save.isPending} data-testid="button-save-settings-bottom">Save settings</Button></div>
     </AppShell>
   );

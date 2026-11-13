@@ -7,6 +7,9 @@ const out = path.resolve(root, "www");
 fs.rmSync(out, { recursive: true, force: true });
 fs.cpSync(src, out, { recursive: true });
 fs.copyFileSync(path.join(root, "setup/boot.js"), path.join(out, "boot.js"));
+// Bundle the on-device background agent (shares core/ with the app).
+import { execSync } from "node:child_process";
+execSync(`${path.resolve(root, "../node_modules/.bin/esbuild")} ${path.join(root, "runner-src/runner.ts")} --bundle --format=iife --target=es2019 --outfile=${path.join(root, "runners/looi-runner.js")}`, { stdio: "inherit", cwd: path.resolve(root, "..") });
 // BackgroundRunner loads its script relative to webDir
 fs.cpSync(path.join(root, "runners"), path.join(out, "runners"), { recursive: true });
 let html = fs.readFileSync(path.join(out, "index.html"), "utf8");

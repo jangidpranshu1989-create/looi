@@ -15,3 +15,6 @@ native/ios
 .env
 .env.*
 !.env.example
+*.jks
+*.keystore
+KEYSTORE-PASSWORD.txt
