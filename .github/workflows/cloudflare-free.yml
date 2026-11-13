@@ -1,0 +1,79 @@
+name: Deploy to Cloudflare (Free)
+
+# 100% free: Cloudflare Workers free plan + Workers KV. No card, no container.
+# Needs repo secrets CLOUDFLARE_API_TOKEN + CLOUDFLARE_ACCOUNT_ID.
+# Optional secrets: NVIDIA_API_KEY, GROQ_API_KEY (shared Looi AI), COMPOSIO_API_KEY (one-click plugins).
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths-ignore: ["**.md", "docs/**"]
+
+concurrency: { group: cloudflare-free, cancel-in-progress: false }
+permissions:
+  contents: write
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    outputs:
+      url: ${{ steps.dep.outputs.url }}
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - name: Check Cloudflare credentials
+        run: |
+          if [ -z "$CLOUDFLARE_API_TOKEN" ] || [ -z "$CLOUDFLARE_ACCOUNT_ID" ]; then
+            echo "::warning::Add CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID in Settings > Secrets > Actions, then run this workflow again."
+            echo "SKIP=1" >> $GITHUB_ENV
+          fi
+      - uses: actions/checkout@v4
+        if: env.SKIP != '1'
+      - uses: actions/setup-node@v4
+        if: env.SKIP != '1'
+        with: { node-version: 22, cache: npm }
+      - name: Build free web app
+        if: env.SKIP != '1'
+        run: npm ci && VITE_LOOI_FREE=1 npm run build
+      - name: Install wrangler
+        if: env.SKIP != '1'
+        working-directory: cloudflare
+        run: npm ci
+      - name: Media KV namespace
+        if: env.SKIP != '1'
+        working-directory: cloudflare
+        run: |
+          ID=$(npx wrangler kv namespace list 2>/dev/null | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const a=JSON.parse(s.slice(s.indexOf("[")));const n=a.find(x=>x.title==="looi-media"||x.title.endsWith("-looi-media"));process.stdout.write(n?n.id:"")}catch{}})')
+          if [ -z "$ID" ]; then
+            OUT=$(npx wrangler kv namespace create looi-media 2>&1); echo "$OUT"
+            ID=$(echo "$OUT" | grep -oE '[0-9a-f]{32}' | head -1)
+          fi
+          [ -n "$ID" ] || { echo "::error::Could not create KV namespace. Token needs 'Workers KV Storage: Edit'."; exit 1; }
+          sed -i "s/__KV_ID__/$ID/" free/wrangler.jsonc
+      - name: Deploy
+        id: dep
+        if: env.SKIP != '1'
+        working-directory: cloudflare
+        env:
+          NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          COMPOSIO_API_KEY: ${{ secrets.COMPOSIO_API_KEY }}
+          LOOI_AI_BASE_URL: ${{ secrets.LOOI_AI_BASE_URL }}
+          LOOI_AI_KEY: ${{ secrets.LOOI_AI_KEY }}
+          LOOI_AI_MODEL: ${{ secrets.LOOI_AI_MODEL }}
+        run: |
+          node -e 'const k=["NVIDIA_API_KEY","GROQ_API_KEY","COMPOSIO_API_KEY","LOOI_AI_BASE_URL","LOOI_AI_KEY","LOOI_AI_MODEL"];const o={};for(const x of k)if(process.env[x])o[x]=process.env[x];require("fs").writeFileSync("/tmp/s.json",JSON.stringify(o))'
+          OUT=$(npx wrangler deploy -c free/wrangler.jsonc --secrets-file /tmp/s.json 2>&1); echo "$OUT"; rm -f /tmp/s.json
+          URL=$(echo "$OUT" | grep -oE 'https://[a-z0-9.-]+\.workers\.dev' | head -1)
+          echo "url=$URL" >> $GITHUB_OUTPUT
+          echo "### Looi Free is live: $URL" >> $GITHUB_STEP_SUMMARY
+          curl -fsS "$URL/relay/status" || true
+
+  android:
+    needs: deploy
+    if: needs.deploy.outputs.url != ''
+    uses: ./.github/workflows/android.yml
+    with:
+      relay_url: ${{ needs.deploy.outputs.url }}
+    secrets: inherit

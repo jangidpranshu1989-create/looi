@@ -20,3 +20,6 @@ native/ios
 KEYSTORE-PASSWORD.txt
 cloudflare/node_modules
 cloudflare/.wrangler
+.dev.vars
+cloudflare/free/.dev.vars
+.wrangler

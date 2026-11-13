@@ -117,7 +117,7 @@ async function checkOne(state: any, m: any) {
 
 async function deviceRun() {
   const state = J(kvGet("looi_state"), null);
-  if (!state?.settings?.apiKey) return;
+  if (!state?.settings?.apiKey && !(state?.settings?.relayUrl && state?.settings?.relayAi)) return;
   const due = (state.missions || []).filter((m: any) => m.status === "active" && (m.nextCheckAt || 0) <= now()).slice(0, 2);
   for (const m of due) {
     try {

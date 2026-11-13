@@ -221,6 +221,29 @@ export default function Landing() {
 
       <section className="border-t border-border" id="pricing">
         <div className="mx-auto max-w-6xl px-5 py-20">
+{me && !me.saas ? (
+            <div className="mx-auto max-w-3xl text-center">
+              <p className="font-mono text-xs uppercase tracking-widest text-primary">Pricing</p>
+              <h2 className="mt-3 font-display text-3xl font-extrabold md:text-4xl">Free. Actually free.</h2>
+              <p className="mt-3 text-muted-foreground">No card, no trial clock, no plans. The agent runs on your phone or in this tab, and the shared Looi relay handles the AI, publishing plugins and public ad links.</p>
+              <div className="mt-10 grid gap-3 text-left sm:grid-cols-3">
+                {[
+                  ["Looi AI included", "NVIDIA NIM with instant Groq backup. Bring your own free key any time."],
+                  ["24/7 on Android", "Background re-checks every 2–3 hours with notifications. No server."],
+                  ["Open source", "AGPL-3.0. Fork it, self-host it, keep your data on your device."],
+                ].map(([t, d]) => (
+                  <div key={t} className="rounded-2xl border border-border bg-card p-5" data-testid={`card-free-${t.split(" ")[0].toLowerCase()}`}>
+                    <p className="font-display font-bold">{t}</p>
+                    <p className="mt-1.5 text-sm text-muted-foreground">{d}</p>
+                  </div>
+                ))}
+              </div>
+              <Link href="/app">
+                <Button size="lg" className="mt-8" data-testid="button-free-open">Open Looi <ArrowRight className="size-4" /></Button>
+              </Link>
+            </div>
+          ) : (
+          <>
           <div className="mx-auto max-w-2xl text-center">
             <p className="font-mono text-xs uppercase tracking-widest text-primary">Pricing</p>
             <h2 className="mt-3 font-display text-3xl font-extrabold md:text-4xl">Start free. Pay when it's working.</h2>
@@ -230,6 +253,8 @@ export default function Landing() {
             <PricingCards plans={me?.plans} trialDays={me?.trialDays} onChoose={() => nav(me?.user ? "/app/billing" : "/signup")} />
           </div>
           <p className="mt-6 inline-flex w-full items-center justify-center gap-1.5 text-center text-xs text-muted-foreground"><Gift className="size-3.5" /> Self-hosting for yourself is free forever. Looi is open source.</p>
+          </>
+          )}
         </div>
       </section>
 

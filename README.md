@@ -33,6 +33,7 @@ Most "AI marketing" tools write a caption and stop. Looi takes a **mission**: ma
 
 ## Use it
 
+- **Looi Free (₹0)** — deploy on the Cloudflare free plan in 5 minutes ([DEPLOY.md](DEPLOY.md)). Users install the APK or open the web app and paste a URL; Looi AI and one-click plugins are included, no keys.
 - **Looi Cloud** — sign up, paste a URL. Looi AI is included, no API keys. 7-day free trial, then Free / Pro / Scale.
 - **Android app** — [download the APK](https://github.com/jangidpranshu1989-create/looi/releases/latest). Runs on Looi Cloud by default; *Advanced → Run on this phone* turns the phone itself into the agent (your own free Groq / NVIDIA NIM key, no server at all).
 - **Self-host** — it's open source. One Docker container.
@@ -52,7 +53,15 @@ Pay with any UPI app (deep link or QR to `8529418454@fam`), then submit the 12-d
 
 Support: [jangid.pranshu1989@gmail.com](mailto:jangid.pranshu1989@gmail.com) · WhatsApp [+91 85294 18454](https://wa.me/918529418454)
 
-## Deploy your own Looi Cloud (Cloudflare)
+## Deploy free (Cloudflare free plan)
+
+1. Free Cloudflare account → API token (template "Edit Cloudflare Workers" + Workers KV Storage edit) + Account ID.
+2. Repo secrets: `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, `NVIDIA_API_KEY`, `GROQ_API_KEY`, `COMPOSIO_API_KEY`.
+3. Actions → **Deploy to Cloudflare (Free)**. The signed APK is rebuilt to point at your Worker.
+
+Full guide and limits: [DEPLOY.md](DEPLOY.md).
+
+## Optional: paid Looi Cloud (Cloudflare Containers)
 
 Looi runs on **Cloudflare**: the web app is served from the edge, the API + 24/7 agent + Chromium/FFmpeg renderer run in an always-on [Cloudflare Container](https://developers.cloudflare.com/containers/), the database and media are kept in **R2**, and a cron trigger keeps the agent awake.
 

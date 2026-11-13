@@ -6,7 +6,7 @@ const BUILT_BASE = "__PORT_5000__".startsWith("__") ? "" : "__PORT_5000__";
 // Native shell (Capacitor) injects window.__LOOI__ = { server, device } before the app boots.
 declare global {
   interface Window {
-    __LOOI__?: { server?: string; device?: string; native?: boolean; mode?: "device" | "server" };
+    __LOOI__?: { server?: string; device?: string; native?: boolean; mode?: "device" | "server"; relay?: string; relayCaps?: { ai?: boolean; composio?: boolean } | null };
   }
 }
 /** On-device mode: the agent runs inside this app (phone) — no server. */

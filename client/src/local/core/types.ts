@@ -14,6 +14,11 @@ export interface Settings {
   publicBaseUrl: string;
   onboarded?: boolean;
   userId?: string;
+  /** Looi Free relay (Cloudflare Worker): shared AI, plugins, public media links. Injected at runtime, never stored. */
+  relayUrl?: string;
+  deviceId?: string;
+  relayAi?: boolean;
+  relayComposio?: boolean;
 }
 export const DEFAULT_SETTINGS: Settings = {
   provider: "groq",

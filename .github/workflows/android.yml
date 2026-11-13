@@ -3,6 +3,17 @@ on:
   push:
     tags: ["v*"]
   workflow_dispatch:
+    inputs:
+      relay_url:
+        description: "Looi Free relay URL (e.g. https://looi.<you>.workers.dev). Leave empty to use the LOOI_RELAY_URL variable."
+        required: false
+        default: ""
+  workflow_call:
+    inputs:
+      relay_url:
+        type: string
+        required: false
+        default: ""
 permissions:
   contents: write
 jobs:
@@ -10,6 +21,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       LOOI_CLOUD_URL: ${{ vars.LOOI_CLOUD_URL }}
+      LOOI_RELAY_URL: ${{ inputs.relay_url || vars.LOOI_RELAY_URL }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

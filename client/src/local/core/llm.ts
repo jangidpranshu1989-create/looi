@@ -23,7 +23,11 @@ export function resolved(st: Settings) {
   return { base: (st.baseUrl || p?.baseUrl || "").replace(/\/$/, ""), model: st.model || p?.defaultModel || "", label: p?.label || st.provider || "AI" };
 }
 
+/** True when this device can think: its own key, or the free Looi AI relay (NIM → Groq). */
+export const hasAi = (st: Settings) => !!st.apiKey || !!(st.relayUrl && st.relayAi);
+
 export async function chat(http: HttpFn, st: Settings, messages: Msg[], o: ChatOpts = {}): Promise<{ text: string; via: string }> {
+  if (!st.apiKey && st.relayUrl && st.relayAi) return relayChat(http, st, messages, o);
   const { base, model, label } = resolved(st);
   if (!st.apiKey) throw new Error("No AI key yet. Add a free Groq or NVIDIA NIM key in Settings → AI engine.");
   if (!base || !model) throw new Error("AI provider base URL / model not configured");
@@ -53,6 +57,19 @@ export async function chat(http: HttpFn, st: Settings, messages: Msg[], o: ChatO
     throw new Error(`${label} returned a non-JSON response`);
   }
   return { text: String(j.choices?.[0]?.message?.content ?? ""), via: `${label} · ${model}` };
+}
+
+async function relayChat(http: HttpFn, st: Settings, messages: Msg[], o: ChatOpts) {
+  const body: any = { model: "looi", messages, max_tokens: o.maxTokens ?? 4000, temperature: o.temperature ?? 0.7 };
+  if (o.json) body.response_format = { type: "json_object" };
+  const r = await http(`${st.relayUrl!.replace(/\/$/, "")}/relay/ai/chat/completions`, { method: "POST", headers: { "Content-Type": "application/json", "X-Looi-Device": st.deviceId || st.userId || "" }, body: JSON.stringify(body), timeout: 150000 });
+  let j: any = {};
+  try {
+    j = JSON.parse(r.text);
+  } catch {}
+  if (!r.ok) throw new Error(j?.message || j?.error?.message || `Looi AI ${r.status}`);
+  const via = j.looi_via === "nvidia" ? "Looi AI · NVIDIA NIM" : j.looi_via === "groq" ? "Looi AI · Groq" : "Looi AI";
+  return { text: String(j.choices?.[0]?.message?.content ?? ""), via };
 }
 
 export function parseJson<T = any>(text: string): T {

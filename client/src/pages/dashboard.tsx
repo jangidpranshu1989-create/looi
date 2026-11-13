@@ -265,7 +265,7 @@ function SetupChecklist() {
   if (!s) return null;
   const hasChannel = chans.some((c) => c.status === "connected");
   const items = [
-    { done: s.hasApiKey || (!s.device && s.builtinAvailable), icon: KeyRound, title: "Add an AI key", body: "Free Groq or NVIDIA NIM key — powers the audit, copy and strategist.", href: "/app/settings", cta: "Add key" },
+    { done: s.hasApiKey || s.builtinAvailable, icon: KeyRound, title: "Add an AI key", body: "Free Groq or NVIDIA NIM key — powers the audit, copy and strategist.", href: "/app/settings", cta: "Add key" },
     { done: hasChannel, icon: Plug, title: "Connect your channels", body: "One-click X, LinkedIn, Reddit, Telegram and more. Looi posts there for you.", href: "/app/channels", cta: "Connect" },
     ...(s.device ? [{ done: s.hasPsiKey, icon: Gauge, title: "PageSpeed key (recommended)", body: "Google's free key makes Lighthouse reliable — the shared quota is often exhausted.", href: "/app/settings", cta: "Add key" }] : []),
   ];

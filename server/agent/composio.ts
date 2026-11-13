@@ -103,10 +103,11 @@ export async function deleteAccount(key: string, id: string) {
 }
 
 async function execute(key: string, ownerId: string, account: string, tool: string, args: any) {
-  const sid = await session(key, composioUser(ownerId));
-  const j = await call(key, "POST", `/tool_router/session/${sid}/execute`, { tool_slug: tool, arguments: args, account });
-  if (j.result_type && j.result_type !== "completed") throw new Error(`${tool}: ${j.error || j.message || j.result_type}`);
-  if (j.error) throw new Error(`${tool}: ${j.error}`);
+  // Direct execute pinned to the user's connected account (the tool-router "account" field needs Composio multi-account)
+  const body: any = { arguments: args, user_id: composioUser(ownerId) };
+  if (account) body.connected_account_id = account;
+  const j = await call(key, "POST", `/tools/execute/${encodeURIComponent(tool)}`, body);
+  if (j.successful === false || j.error) throw new Error(`${tool}: ${typeof j.error === "string" ? j.error : JSON.stringify(j.error || j.data || "failed").slice(0, 200)}`);
   return j.data ?? j;
 }
 

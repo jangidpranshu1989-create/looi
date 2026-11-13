@@ -9,9 +9,23 @@ const BASE = "https://backend.composio.dev/api/v3.1";
 
 export const composioUser = (userId: string) => `looi-${userId}`.slice(0, 120);
 
+/** The user's own Composio key, or "relay:<url>|<device>" for the free shared plugins on the Looi relay. */
+export function cxKey(st: Settings) {
+  const own = (st.composioKey || "").trim();
+  if (own) return own;
+  return st.relayUrl && st.relayComposio ? `relay:${st.relayUrl.replace(/\/$/, "")}|${st.deviceId || st.userId || ""}` : "";
+}
+
 async function call(http: HttpFn, key: string, method: string, path: string, body?: any) {
   if (!key) throw new Error("Composio is not set up. Add your Composio API key in Plugins.");
-  const r = await http(BASE + path, { method, headers: { "x-api-key": key, ...(body ? { "Content-Type": "application/json" } : {}) }, body: body ? JSON.stringify(body) : undefined, timeout: 60000 });
+  let url = BASE + path;
+  let headers: Record<string, string> = { "x-api-key": key };
+  if (key.startsWith("relay:")) {
+    const [base, dev] = key.slice(6).split("|");
+    url = `${base}/relay/composio${path}`;
+    headers = { "X-Looi-Device": dev };
+  }
+  const r = await http(url, { method, headers: { ...headers, ...(body ? { "Content-Type": "application/json" } : {}) }, body: body ? JSON.stringify(body) : undefined, timeout: 60000 });
   let j: any = {};
   try {
     j = r.text ? JSON.parse(r.text) : {};
@@ -63,10 +77,11 @@ export async function deleteAccount(http: HttpFn, key: string, id: string) {
 }
 
 async function execute(http: HttpFn, key: string, userId: string, account: string, tool: string, args: any) {
-  const sid = await session(http, key, composioUser(userId));
-  const j = await call(http, key, "POST", `/tool_router/session/${sid}/execute`, { tool_slug: tool, arguments: args, account });
-  if (j.result_type && j.result_type !== "completed") throw new Error(`${tool}: ${j.error || j.message || j.result_type}`);
-  if (j.error) throw new Error(`${tool}: ${typeof j.error === "string" ? j.error : JSON.stringify(j.error).slice(0, 200)}`);
+  // Direct execute pinned to the user's connected account (the tool-router "account" field needs Composio multi-account)
+  const body: any = { arguments: args, user_id: composioUser(userId) };
+  if (account) body.connected_account_id = account;
+  const j = await call(http, key, "POST", `/tools/execute/${encodeURIComponent(tool)}`, body);
+  if (j.successful === false || j.error) throw new Error(`${tool}: ${typeof j.error === "string" ? j.error : JSON.stringify(j.error || j.data || "failed").slice(0, 200)}`);
   return j.data ?? j;
 }
 
@@ -108,10 +123,10 @@ const pickId = (d: any): string => {
 };
 
 export async function publishComposio(http: HttpFn, st: Settings, userId: string, cfg: any, p: ComposioPost) {
-  const key = (st.composioKey || "").trim();
+  const key = cxKey(st);
   const def = pluginDef(cfg.toolkit);
   const steps: string[] = p.posterUrl && def?.stepsWithImage?.length ? def.stepsWithImage : def?.steps?.length ? def.steps : cfg.publishTool ? [cfg.publishTool] : [];
-  if (!steps.length) throw new Error(def?.needsPublicMedia ? `${def.name} needs a public image URL, which the on-device agent can't host. Download the ad and post it manually, or use a Looi server.` : "No publishing tool configured for this plugin");
+  if (!steps.length) throw new Error(def?.needsPublicMedia ? `${def.name} needs a public image link for the ad. Turn on Looi Free (Settings → Where Looi runs) or set a public media URL, then publish again.` : "No publishing tool configured for this plugin");
   const context: Record<string, any> = {};
   for (const t of def?.context || []) {
     try {

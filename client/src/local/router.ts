@@ -1,7 +1,7 @@
 /** In-app API router for on-device mode. Implements the same endpoints/shapes as server/routes.ts. */
 import { db, type Row } from "./db";
 import { http } from "./net";
-import { PROVIDERS, testProvider, listModels } from "./core/llm";
+import { PROVIDERS, testProvider, listModels, hasAi } from "./core/llm";
 import * as cx from "./core/composio";
 import { FORMATS, TEMPLATES } from "./core/marketing";
 import { normalizeUrl } from "./analyze";
@@ -21,7 +21,7 @@ const CHANNEL_TYPES = {
 
 function maskSettings(s: any) {
   const { apiKey, psiKey, composioKey, ...rest } = s;
-  return { ...rest, hasComposioKey: !!composioKey, composioKeyHint: composioKey ? "••••" + composioKey.slice(-4) : "", composioServer: false, hasApiKey: !!apiKey, apiKeyHint: apiKey ? "••••" + apiKey.slice(-4) : "", hasPsiKey: !!psiKey, builtinAvailable: false, device: true };
+  return { ...rest, hasComposioKey: !!composioKey, composioKeyHint: composioKey ? "••••" + composioKey.slice(-4) : "", hasApiKey: !!apiKey, apiKeyHint: apiKey ? "••••" + apiKey.slice(-4) : "", hasPsiKey: !!psiKey, builtinAvailable: !!(s.relayUrl && s.relayAi), relayUrl: s.relayUrl || "", relayAi: !!s.relayAi, relayComposio: !!s.relayComposio, composioServer: !!s.relayComposio && !composioKey, device: true };
 }
 function maskChannel(c: Row) {
   const cfg = c.config || {};
@@ -41,7 +41,7 @@ const byIdDesc = (a: Row, b: Row) => b.id - a.id;
 async function refreshPlugin(chId: number) {
   const ch = db.get("channels", chId)!;
   const st = A.getSettings();
-  const key = st.composioKey;
+  const key = cx.cxKey(st);
   const cfg = ch.config || {};
   const a = await cx.accountStatus(http, key, cfg.connectedAccountId);
   if (a.status === "ACTIVE") {
@@ -145,7 +145,7 @@ on("POST", "/api/missions", (_p, b) => {
     throw new HttpError(400, "Please enter a valid URL");
   }
   const st = A.getSettings();
-  if (!st.apiKey) throw new HttpError(400, "Add your free Groq or NVIDIA NIM key first (Settings → AI engine). The on-device agent uses it for the audit, copy and strategy.");
+  if (!hasAi(st)) throw new HttpError(400, "Add your free Groq or NVIDIA NIM key first (Settings → AI engine). The on-device agent uses it for the audit, copy and strategy.");
   const channelIds = b?.channelIds ?? db.where("channels", (c) => c.status === "connected").map((c) => c.id);
   const m = db.insert("missions", { url, name: new URL(url).hostname.replace(/^www\./, ""), favicon: "", status: "queued", stage: "Queued", progress: 0, mode: b?.mode || st.defaultMode, goal: b?.goal || "", channelIds, cycle: 0, site: {}, report: {}, brief: {}, strategy: {}, healthScore: 0, lastError: "", createdAt: Date.now(), lastCheckAt: 0, nextCheckAt: 0 });
   A.addEvent(m.id, "info", "Mission created", `Target: ${url} · running on this device`);
@@ -257,18 +257,18 @@ on("POST", "/api/approvals/:id/decide", (p, b) => {
 // plugins
 on("GET", "/api/plugins", () => {
   const st = A.getSettings();
-  return { configured: !!st.composioKey, source: st.composioKey ? "user" : null, device: true, catalog: cx.PLUGINS.map((p) => ({ slug: p.slug, name: p.name, category: p.category, blurb: p.blurb, target: p.target || null, needsPublicMedia: !!p.needsPublicMedia, logo: cx.logo(p.slug) })) };
+  return { configured: !!cx.cxKey(st), source: st.composioKey ? "user" : st.relayComposio ? "server" : null, device: true, catalog: cx.PLUGINS.map((p) => ({ slug: p.slug, name: p.name, category: p.category, blurb: p.blurb, target: p.target || null, needsPublicMedia: !!p.needsPublicMedia, logo: cx.logo(p.slug) })) };
 });
 on("POST", "/api/plugins/verify", async (_p, b) => {
   try {
-    return await cx.verifyKey(http, String(b?.key || A.getSettings().composioKey));
+    return await cx.verifyKey(http, String(b?.key || cx.cxKey(A.getSettings())));
   } catch (e) {
     throw new HttpError(400, (e as Error).message);
   }
 });
 on("GET", "/api/plugins/search", async (_p, _b, q) => {
   try {
-    return await cx.searchToolkits(http, A.getSettings().composioKey, String(q.get("q") || "").slice(0, 60));
+    return await cx.searchToolkits(http, cx.cxKey(A.getSettings()), String(q.get("q") || "").slice(0, 60));
   } catch (e) {
     throw new HttpError(400, (e as Error).message);
   }
@@ -281,7 +281,7 @@ on("POST", "/api/plugins/connect", async (_p, b) => {
   if (def?.target?.required && !target) throw new HttpError(400, `${def.target.label} is required for ${def.name}`);
   try {
     const st = A.getSettings();
-    const { redirectUrl, connectedAccountId } = await cx.createConnectLink(http, st.composioKey, st.userId!, toolkit, "");
+    const { redirectUrl, connectedAccountId } = await cx.createConnectLink(http, cx.cxKey(st), st.userId!, toolkit, "");
     const name = (def?.name || String(b?.name || toolkit)) + (target ? ` · ${target}` : "");
     const ch = db.insert("channels", { type: "composio", name: name.slice(0, 80), config: { toolkit, connectedAccountId, target, logo: String(b?.logo || "") }, status: "pending", lastError: "", createdAt: Date.now() });
     return [{ redirectUrl, channel: maskChannel(ch) }, 201];
@@ -347,7 +347,7 @@ on("POST", "/api/channels/:id/test", async (p) => {
 on("DELETE", "/api/channels/:id", (p) => {
   const ch = db.get("channels", Number(p.id));
   if (!ch) throw new HttpError(404, "Not found");
-  if (ch.type === "composio" && ch.config?.connectedAccountId) void cx.deleteAccount(http, A.getSettings().composioKey, ch.config.connectedAccountId);
+  if (ch.type === "composio" && ch.config?.connectedAccountId) void cx.deleteAccount(http, cx.cxKey(A.getSettings()), ch.config.connectedAccountId);
   db.remove("channels", (x) => x.id === ch.id);
   return { ok: true };
 });

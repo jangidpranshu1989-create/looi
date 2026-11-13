@@ -1,6 +1,8 @@
 // Native boot: Looi Cloud by default (sign up, nothing to configure). Advanced: run on this phone with own keys, or a custom server.
 (async function () {
   var CLOUD = "__LOOI_CLOUD_URL__"; if (CLOUD.indexOf("__") === 0) CLOUD = "";
+  // Looi Free relay (Cloudflare Workers free plan): shared AI (NIM -> Groq), plugins and public ad links, so the phone needs no keys
+  var RELAY = "__LOOI_RELAY_URL__"; if (RELAY.indexOf("__") === 0) RELAY = "";
   var C = window.Capacitor, PL = (C && C.Plugins) || {}, P = PL.Preferences;
   async function get(k) { if (!P) return null; var r = await P.get({ key: k }); return r && r.value; }
   async function set(k, v) { if (P) await P.set({ key: k, value: v }); }
@@ -10,6 +12,16 @@
   var mode = await get("mode"), server = await get("server");
   if (!mode && server) mode = "server"; // upgrade from the server-only build
   if (!mode && CLOUD) { mode = "server"; server = CLOUD; await set("mode", mode); await set("server", server); }
+  if (!mode && RELAY) { mode = "device"; await set("mode", mode); }
+  var relayCaps = null;
+  if (RELAY) {
+    try { relayCaps = JSON.parse((await get("relayCaps")) || "null"); } catch (e) {}
+    try {
+      var ctl = new AbortController(); var tm = setTimeout(function () { ctl.abort(); }, 4000);
+      var rs = await fetch(RELAY + "/relay/status", { signal: ctl.signal }); clearTimeout(tm);
+      if (rs.ok) { relayCaps = await rs.json(); await set("relayCaps", JSON.stringify(relayCaps)); }
+    } catch (e) {}
+  }
   function syncRunner(token) {
     if (mode !== "server") return;
     try { PL.BackgroundRunner.dispatchEvent({ label: "app.looi.agent.check", event: "looiCheck", details: { server: server, device: device, token: token == null ? (localStorage.getItem("looiToken") || "") : token } }); } catch (e) {}
@@ -17,7 +29,7 @@
   window.__LOOI_TOKEN_SYNC__ = syncRunner;
 
   function start() {
-    window.__LOOI__ = { server: mode === "server" ? server : "", device: device, native: true, mode: mode };
+    window.__LOOI__ = { server: mode === "server" ? server : "", device: device, native: true, mode: mode, relay: RELAY, relayCaps: relayCaps };
     try { PL.LocalNotifications.requestPermissions(); } catch (e) {}
     syncRunner();
     try { PL.SplashScreen && PL.SplashScreen.hide(); } catch (e) {}
@@ -41,7 +53,7 @@
     '<p style="color:#9b9ba3;font-size:15px;margin:0 0 18px">Where should Looi run?</p>' +
     (CLOUD ? '<button id="cld" style="' + card + ';border-color:#D4FF3A55"><div style="display:flex;justify-content:space-between;align-items:center"><b style="font-size:16px">Looi Cloud</b><span style="font-size:11px;font-weight:700;background:#D4FF3A;color:#0b0b0d;border-radius:99px;padding:3px 8px">RECOMMENDED</span></div><div style="color:#9b9ba3;font-size:13px;margin-top:6px">Free trial, no API keys. Runs 24/7 in the cloud even when your phone is off.</div></button>' : '') +
     '<button id="dev" style="' + card + (CLOUD ? '' : ';border-color:#D4FF3A55') + '"><div style="display:flex;justify-content:space-between;align-items:center"><b style="font-size:16px">Run on this phone</b>' + (CLOUD ? '' : '<span style="font-size:11px;font-weight:700;background:#D4FF3A;color:#0b0b0d;border-radius:99px;padding:3px 8px">RECOMMENDED</span>') + '</div>' +
-    '<div style="color:#9b9ba3;font-size:13px;margin-top:6px">No server. Audits, ads, publishing and background checks all happen on your device with your own free API keys.</div></button>' +
+    '<div style="color:#9b9ba3;font-size:13px;margin-top:6px">' + (RELAY ? 'Free forever. No server, no API keys. Audits, ads, publishing and background checks run on your phone.' : 'No server. Audits, ads, publishing and background checks all happen on your device with your own free API keys.') + '</div></button>' +
     '<button id="srv" style="' + card + '"><b style="font-size:16px">Connect to a Looi server</b><div style="color:#9b9ba3;font-size:13px;margin-top:6px">For teams or always-on cloud runs. You host it (Docker).</div></button>' +
     '<form id="f" style="display:none;margin-top:14px"><input id="u" type="url" required placeholder="https://looi.yourdomain.com" style="width:100%;box-sizing:border-box;padding:14px;border-radius:12px;border:1px solid #26262b;background:#0e0e11;color:#fff;font-size:16px"/>' +
     '<p id="e" style="color:#f87171;font-size:13px;min-height:18px;margin:8px 0"></p>' +

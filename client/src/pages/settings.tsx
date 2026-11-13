@@ -81,7 +81,16 @@ export default function Settings() {
       <h1 className="font-display text-xl font-bold">Settings</h1>
       <p className="mt-1 text-sm text-muted-foreground">Configure the agent's brain, rhythm and how it publishes.</p>
 
-      <Section title="AI engine" desc={saas ? "Looi AI is included in your plan. Advanced: switch to your own OpenAI-compatible key." : "Looi uses this model for audits, copy and strategy. Any OpenAI-compatible endpoint works."}>
+      <Section title="AI engine" desc={saas ? "Looi AI is included in your plan. Advanced: switch to your own OpenAI-compatible key." : s.device && s.builtinAvailable ? "Looi AI (NVIDIA NIM with instant Groq failover) is included free. Add your own key only if you want a different model or higher limits." : "Looi uses this model for audits, copy and strategy. Any OpenAI-compatible endpoint works."}>
+        {s.device && s.builtinAvailable && (
+          <div className="flex items-start gap-3 rounded-lg border border-primary/40 bg-primary/5 p-4" data-testid="banner-free-ai">
+            <span className="mt-1 h-2 w-2 shrink-0 rounded-full bg-primary" />
+            <div>
+              <p className="text-sm font-medium">Looi AI included · free, no key</p>
+              <p className="text-xs text-muted-foreground">Leave the API key empty and Looi uses its shared engine. Paste a key below to use your own model instead.</p>
+            </div>
+          </div>
+        )}
         <div className={cn("grid grid-cols-2 gap-2", s.device ? "sm:grid-cols-4" : "sm:grid-cols-5")}>
           {ENGINES.filter((e) => !(s.device && e.id === "builtin")).map((e) => (
             <button key={e.id} onClick={() => { setF({ ...f, provider: e.id, baseUrl: meta?.providers?.[e.id]?.baseUrl || (e.id === "custom" ? f.baseUrl : ""), model: meta?.providers?.[e.id]?.defaultModel || "" }); setModels([]); setTestRes(null); }} className={cn("rounded-lg border p-3 text-left hover-elevate", f.provider === e.id ? "border-primary bg-primary/5" : "border-border")} data-testid={`button-engine-${e.id}`}>
@@ -98,7 +107,7 @@ export default function Settings() {
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="key" className="flex items-center justify-between">API key {prov?.keyUrl && <a href={prov.keyUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-xs font-normal text-primary">Get a key <ExternalLink className="size-3" /></a>}</Label>
-              <Input id="key" type="password" value={key} onChange={(e) => setKey(e.target.value)} placeholder={s.hasApiKey ? `Saved ${s.apiKeyHint} — type to replace` : "Paste your key"} autoComplete="off" data-testid="input-api-key" />
+              <Input id="key" type="password" value={key} onChange={(e) => setKey(e.target.value)} placeholder={s.hasApiKey ? `Saved ${s.apiKeyHint} — type to replace` : s.builtinAvailable ? "Optional — leave empty to use Looi AI" : "Paste your key"} autoComplete="off" data-testid="input-api-key" />
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="model">Model</Label>
@@ -167,7 +176,7 @@ export default function Settings() {
       </Section>
 
       <Section title="Plugins" desc="One-click OAuth for X, LinkedIn, Facebook, Instagram, Reddit, Slack, Discord, Telegram, Gmail and 1,000+ more apps through Composio.">
-        {saas && s.composioServer ? (
+        {(saas || s.device) && s.composioServer ? (
           <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-card p-4">
             <div>
               <p className="text-sm font-medium">Included with Looi</p>

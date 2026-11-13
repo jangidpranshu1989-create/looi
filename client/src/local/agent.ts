@@ -32,13 +32,19 @@ export function getSettings(): Settings {
     s.userId = "u" + Math.random().toString(36).slice(2) + Date.now().toString(36);
     db.kvSet("settings", s);
   }
-  return { ...DEFAULT_SETTINGS, ...s };
+  return { ...DEFAULT_SETTINGS, ...s, ...relayInfo() };
+}
+/** Looi Free relay discovered at boot (window.__LOOI__.relay + /relay/status). */
+function relayInfo(): Partial<Settings> {
+  const L: any = typeof window !== "undefined" ? (window as any).__LOOI__ : null;
+  if (!L?.relay) return { relayUrl: "", relayAi: false, relayComposio: false };
+  return { relayUrl: L.relay, deviceId: L.device || "", relayAi: !!L.relayCaps?.ai, relayComposio: !!L.relayCaps?.composio };
 }
 export function updateSettings(patch: Partial<Settings>) {
-  const s = { ...getSettings(), ...patch };
+  const { relayUrl, deviceId, relayAi, relayComposio, ...s } = { ...getSettings(), ...patch } as Settings;
   db.kvSet("settings", s);
   onStateChange();
-  return s;
+  return getSettings();
 }
 
 // ---------- helpers
@@ -116,6 +122,24 @@ function createCreative(m: Row, cycle: number, angle: any, template: TemplateKey
 }
 
 // ---------- publishing
+/** Public link for a rendered ad via the Looi Free relay (Instagram & co. fetch media by URL). Cached ~6 days. */
+async function publicLink(st: Settings, crId: number, file: string, field: "pubPoster" | "pubVideo"): Promise<string> {
+  if (!st.relayUrl || !file) return "";
+  const cr = db.get("creatives", crId);
+  const cached = cr?.[field];
+  if (cached?.url && cached.until > now()) return cached.url;
+  const blob = await getMedia(file);
+  if (!blob || blob.size > 24 * 1024 * 1024) return "";
+  try {
+    const r = await fetch(`${st.relayUrl.replace(/\/$/, "")}/relay/media`, { method: "POST", headers: { "Content-Type": blob.type || "image/jpeg", "X-Looi-Device": st.deviceId || st.userId || "" }, body: blob });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok || !j.url) return "";
+    db.update("creatives", crId, { [field]: { url: j.url, until: now() + 6 * 86400_000 } });
+    return j.url as string;
+  } catch {
+    return "";
+  }
+}
 export async function publishCreatives(missionId: number, creativeIds: number[], channelIds: number[]) {
   const m = getMission(missionId);
   if (!m) return;
@@ -135,7 +159,11 @@ export async function publishCreatives(missionId: number, creativeIds: number[],
       try {
         const caption = captionFor(capKeyFor(tk), copy.captions || {}, link, copy.hashtags || []);
         let res = { externalId: "", externalUrl: "" };
-        if (ch.type === "composio") res = await publishComposio(http, st, st.userId!, ch.config, { caption, title: copy.headline || m.name, link, posterUrl: "", videoUrl: "" });
+        if (ch.type === "composio") {
+          const posterUrl = await publicLink(st, cr.id, cr.posterFile, "pubPoster");
+          const videoUrl = posterUrl ? await publicLink(st, cr.id, cr.videoFile, "pubVideo") : "";
+          res = await publishComposio(http, st, st.userId!, ch.config, { caption, title: copy.headline || m.name, link, posterUrl, videoUrl });
+        }
         else if (ch.type === "webhook") {
           const pb = await getMedia(cr.posterFile);
           const r = await http(ch.config.url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ event: "looi.post", title: copy.headline, caption, link, posterBase64: pb ? await blobToB64(pb) : "" }) });
