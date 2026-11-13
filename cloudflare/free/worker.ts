@@ -68,20 +68,81 @@ function overLimit(key: string, max: number) {
 }
 const ipOf = (req: Request) => req.headers.get("cf-connecting-ip") || "0";
 
-// ---------------- Looi AI: NIM → Groq → others, with a circuit breaker ----------------
-type Hop = { key: string; base: string; apiKey: string; model: string; timeout: number };
+// ---------------- Looi AI: NIM → Groq → others, with a circuit breaker + model auto-pick ----------------
+type Hop = { key: string; base: string; apiKey: string; models: string[]; timeout: number };
 const tripped = new Map<string, number>();
+// Preferred models, best first. Providers retire models often, so Looi checks /models and skips dead ones.
+const NIM_MODELS = ["deepseek-ai/deepseek-v4.1-flash", "moonshotai/kimi-k2.6", "nvidia/nemotron-3-super-120b-a12b", "mistralai/mistral-large-4-1t-a52b", "nvidia/llama-3.1-nemotron-ultra-253b-v1", "openai/gpt-oss-20b"];
+const GROQ_MODELS = ["openai/gpt-oss-120b", "moonshotai/kimi-k2-instruct-0905", "llama-3.3-70b-versatile", "qwen/qwen3-32b", "openai/gpt-oss-20b", "llama-3.1-8b-instant"];
 function hops(env: Env): Hop[] {
   const nimT = Number(env.LOOI_NIM_TIMEOUT_MS) || 45000;
+  const pref = (m: string | undefined, list: string[]) => [...new Set([...(m ? m.split(",").map((s) => s.trim()) : []), ...list])].filter(Boolean);
   const all: (Hop | null)[] = [
-    env.LOOI_AI_BASE_URL && env.LOOI_AI_KEY ? { key: "custom", base: env.LOOI_AI_BASE_URL.replace(/\/$/, ""), apiKey: env.LOOI_AI_KEY, model: env.LOOI_AI_MODEL || "", timeout: 90000 } : null,
-    env.NVIDIA_API_KEY ? { key: "nvidia", base: (env.NVIDIA_BASE_URL || "https://integrate.api.nvidia.com/v1").replace(/\/$/, ""), apiKey: env.NVIDIA_API_KEY, model: env.NVIDIA_MODEL || "openai/gpt-oss-120b", timeout: nimT } : null,
-    env.GROQ_API_KEY ? { key: "groq", base: (env.GROQ_BASE_URL || "https://api.groq.com/openai/v1").replace(/\/$/, ""), apiKey: env.GROQ_API_KEY, model: env.GROQ_MODEL || "openai/gpt-oss-120b", timeout: 90000 } : null,
+    env.LOOI_AI_BASE_URL && env.LOOI_AI_KEY ? { key: "custom", base: env.LOOI_AI_BASE_URL.replace(/\/$/, ""), apiKey: env.LOOI_AI_KEY, models: pref(env.LOOI_AI_MODEL, []), timeout: 90000 } : null,
+    env.NVIDIA_API_KEY ? { key: "nvidia", base: (env.NVIDIA_BASE_URL || "https://integrate.api.nvidia.com/v1").replace(/\/$/, ""), apiKey: env.NVIDIA_API_KEY, models: pref(env.NVIDIA_MODEL, NIM_MODELS), timeout: nimT } : null,
+    env.GROQ_API_KEY ? { key: "groq", base: (env.GROQ_BASE_URL || "https://api.groq.com/openai/v1").replace(/\/$/, ""), apiKey: env.GROQ_API_KEY, models: pref(env.GROQ_MODEL, GROQ_MODELS), timeout: 90000 } : null,
   ];
   const list = all.filter(Boolean) as Hop[];
   const now = Date.now();
   const healthy = list.filter((h) => (tripped.get(h.key) || 0) < now);
   return healthy.length ? healthy : list; // everything tripped → try all anyway
+}
+
+const modelCache = new Map<string, { at: number; ids: Set<string> | null }>();
+const goodModel = new Map<string, string>();
+const deadModel = new Map<string, number>();
+async function liveModels(h: Hop): Promise<string[]> {
+  let c = modelCache.get(h.key);
+  if (!c || Date.now() - c.at > 3600_000) {
+    let ids: Set<string> | null = null;
+    try {
+      const r = await fetch(`${h.base}/models`, { headers: { authorization: `Bearer ${h.apiKey}` }, signal: AbortSignal.timeout(6000) });
+      if (r.ok) ids = new Set(((await r.json()) as any)?.data?.map((m: any) => m.id) || []);
+    } catch {}
+    c = { at: Date.now(), ids: ids && ids.size ? ids : null };
+    modelCache.set(h.key, c);
+  }
+  const now = Date.now();
+  let ms = h.models.filter((m) => (deadModel.get(h.key + "|" + m) || 0) < now);
+  if (c.ids) ms = ms.filter((m) => c!.ids!.has(m));
+  const g = goodModel.get(h.key);
+  if (g && ms.includes(g)) ms = [g, ...ms.filter((m) => m !== g)];
+  return ms.length ? ms.slice(0, 3) : h.models.slice(0, 1);
+}
+const modelGone = (status: number, text: string) => status === 404 || status === 410 || (status === 400 && /model/i.test(text) && /(not|invalid|exist|support|found|decommission|deprecat)/i.test(text));
+
+async function callHop(h: Hop, body: any, errors: string[]) {
+  for (const model of await liveModels(h)) {
+    const reasoning = /gpt-oss|qwen3|nemotron.*reason|kimi-k2\.6|deepseek-v4/i.test(model);
+    const payload: any = { ...body, model };
+    if (reasoning) payload.max_tokens = Math.max(payload.max_tokens, 1200);
+    if (/gpt-oss/i.test(model) && !payload.reasoning_effort) payload.reasoning_effort = "low";
+    const send = (p: any) => fetch(`${h.base}/chat/completions`, { method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${h.apiKey}` }, body: JSON.stringify(p), signal: AbortSignal.timeout(h.timeout) });
+    let r = await send(payload);
+    let text = await r.text();
+    if (!r.ok && r.status === 400 && (payload.response_format || payload.reasoning_effort) && !modelGone(r.status, text)) {
+      delete payload.response_format;
+      delete payload.reasoning_effort;
+      r = await send(payload);
+      text = await r.text();
+    }
+    if (!r.ok) {
+      if (modelGone(r.status, text)) {
+        deadModel.set(h.key + "|" + model, Date.now() + 6 * 3600_000);
+        errors.push(`${h.key}/${model} retired`);
+        continue;
+      }
+      throw new Error(`${h.key} ${r.status}: ${text.slice(0, 160)}`);
+    }
+    const j = JSON.parse(text);
+    if (!String(j?.choices?.[0]?.message?.content || "").trim()) {
+      errors.push(`${h.key}/${model}: empty reply`);
+      continue;
+    }
+    goodModel.set(h.key, model);
+    return { ...j, looi_via: h.key, looi_model: model };
+  }
+  throw new Error(`${h.key}: no working model`);
 }
 
 async function aiChat(req: Request, env: Env) {
@@ -99,28 +160,11 @@ async function aiChat(req: Request, env: Env) {
   if (!Array.isArray(body?.messages)) return err(400, "messages required");
   body.max_tokens = Math.min(Number(body.max_tokens) || 4000, 8000);
   delete body.stream;
+  delete body.model;
   const errors: string[] = [];
   for (const h of list) {
     try {
-      const r = await fetch(`${h.base}/chat/completions`, {
-        method: "POST",
-        headers: { "content-type": "application/json", authorization: `Bearer ${h.apiKey}` },
-        body: JSON.stringify({ ...body, model: h.model || body.model }),
-        signal: AbortSignal.timeout(h.timeout),
-      });
-      const text = await r.text();
-      if (!r.ok) {
-        // retry once without response_format on providers that reject it
-        if (r.status === 400 && body.response_format) {
-          const r2 = await fetch(`${h.base}/chat/completions`, { method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${h.apiKey}` }, body: JSON.stringify({ ...body, response_format: undefined, model: h.model || body.model }), signal: AbortSignal.timeout(h.timeout) });
-          const t2 = await r2.text();
-          if (r2.ok && JSON.parse(t2)?.choices?.[0]?.message?.content) return json({ ...JSON.parse(t2), looi_via: h.key });
-        }
-        throw new Error(`${h.key} ${r.status}: ${text.slice(0, 160)}`);
-      }
-      const j = JSON.parse(text);
-      if (!String(j?.choices?.[0]?.message?.content || "").trim()) throw new Error(`${h.key}: empty reply`);
-      return json({ ...j, looi_via: h.key });
+      return json(await callHop(h, body, errors));
     } catch (e: any) {
       tripped.set(h.key, Date.now() + 3 * 60_000);
       errors.push(String(e?.message || e).slice(0, 200));
@@ -128,6 +172,25 @@ async function aiChat(req: Request, env: Env) {
     }
   }
   return err(502, "Looi AI is busy right now: " + errors.join(" | "));
+}
+
+/** Admin-only health check of every AI provider (which model answers, how fast). */
+async function aiDiag(req: Request, env: Env) {
+  const tok = req.headers.get("x-looi-admin") || "";
+  if (!env.LOOI_ADMIN_TOKEN || tok !== env.LOOI_ADMIN_TOKEN) return err(401, "Wrong admin key.");
+  const all = hops(env);
+  const out: any[] = [];
+  for (const h of all) {
+    const t0 = Date.now();
+    const errors: string[] = [];
+    try {
+      const j = await callHop(h, { messages: [{ role: "user", content: "Reply with exactly: LOOI OK" }], max_tokens: 50 }, errors);
+      out.push({ provider: h.key, ok: true, model: j.looi_model, ms: Date.now() - t0, reply: String(j.choices[0].message.content).slice(0, 40), skipped: errors });
+    } catch (e: any) {
+      out.push({ provider: h.key, ok: false, ms: Date.now() - t0, error: String(e?.message || e).slice(0, 200), skipped: errors });
+    }
+  }
+  return json({ providers: out });
 }
 
 // ---------------- Composio proxy (owner's key, each device is its own Composio user) ----------------
@@ -362,6 +425,7 @@ export default {
     try {
       if (p === "/relay/status") return json({ ok: true, free: true, ai: hops(env).length > 0, composio: !!env.COMPOSIO_API_KEY, media: true, fetch: true, payments: true, upi: upiId(env) });
       if (p === "/relay/ai/chat/completions" && req.method === "POST") return aiChat(req, env);
+      if (p === "/relay/ai/diag") return aiDiag(req, env);
       if (p === "/relay/ai/models") return json({ data: [{ id: "looi", object: "model" }] });
       if (p.startsWith("/relay/composio/")) return composio(req, env, p.slice("/relay/composio".length));
       if (p === "/relay/media" && req.method === "POST") return putMedia(req, env);
